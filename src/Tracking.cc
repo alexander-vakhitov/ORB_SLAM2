@@ -16,6 +16,12 @@
 *
 * You should have received a copy of the GNU General Public License
 * along with ORB-SLAM2. If not, see <http://www.gnu.org/licenses/>.
+*
+* (C) 2018 Alexander Vakhitov <alexander.vakhitov at gmail dot com>
+* Created: functions TrackReferenceSego and TriangulateLRPoints
+* Modified: a function Track to use TrackReferenceSego(),
+* the constructor to store SEGO properties,
+*
 */
 
 
@@ -36,6 +42,10 @@
 #include<iostream>
 
 #include<mutex>
+#include <opencv/cxeigen.hpp>
+#include <include/SEGOLoop.h>
+#include <include/P3PLoop.h>
+
 #include "Sleep.h"
 
 using namespace std;
@@ -43,7 +53,8 @@ using namespace std;
 namespace ORB_SLAM2
 {
 
-Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer, MapDrawer *pMapDrawer, Map *pMap, KeyFrameDatabase* pKFDB, const string &strSettingPath, const int sensor):
+Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer, MapDrawer *pMapDrawer, Map *pMap,
+                   KeyFrameDatabase* pKFDB, const string &strSettingPath, const int sensor):
     mState(NO_IMAGES_YET), mSensor(sensor), mbOnlyTracking(false), mbVO(false), mpORBVocabulary(pVoc),
     mpKeyFrameDB(pKFDB), mpInitializer(static_cast<Initializer*>(NULL)), mpSystem(pSys), mpViewer(NULL),
     mpFrameDrawer(pFrameDrawer), mpMapDrawer(pMapDrawer), mpMap(pMap), mnLastRelocFrameId(0)
@@ -144,6 +155,20 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
             mDepthMapFactor=1;
         else
             mDepthMapFactor = 1.0f/mDepthMapFactor;
+    }
+
+    bSegoRecovery = (int)fSettings["SEGORecovery"];
+    bUseP3P = (int)fSettings["IsP3P"];
+
+    cout << endl  << "SEGO Parameters: " << endl;
+    cout << "- Use stereo egomotion recovery: " << bSegoRecovery << endl;
+    if (bSegoRecovery)
+    {
+        if (bUseP3P) {
+            cout << "- Use P3P " << endl;
+        } else {
+            cout << "- Use SEGO " << endl;
+        }
     }
 
 }
@@ -311,13 +336,19 @@ void Tracking::Track()
                 else
                 {
                     bOK = TrackWithMotionModel();
-                    if(!bOK)
-                        bOK = TrackReferenceKeyFrame();
+                    if(!bOK) {
+                        bOK = TrackReferenceSego();
+                    }
                 }
             }
             else
             {
                 bOK = Relocalization();
+                if (!bOK && bSegoRecovery)
+                {
+                    bOK = TrackReferenceSego();
+                    std::cout << " tracking failed; localization failed; track approx " << bOK << std::endl;
+                }
             }
         }
         else
@@ -397,8 +428,17 @@ void Tracking::Track()
         // If we have an initial estimation of the camera pose and matching. Track the local map.
         if(!mbOnlyTracking)
         {
-            if(bOK)
+            if(bOK) {
                 bOK = TrackLocalMap();
+                if (!bOK && bSegoRecovery)
+                {
+                    std::cout << " track local map failed " << std::endl;
+                    bOK = TrackReferenceSego();
+                    std::cout << " approx tried " << bOK << std::endl;
+                    bOK = TrackLocalMap();
+                    std::cout << " track map  " << bOK << std::endl;
+                }
+            }
         }
         else
         {
@@ -863,6 +903,279 @@ void Tracking::UpdateLastFrame()
             break;
     }
 }
+
+    void TriangulateLRPoints(const std::vector<std::vector<cv::KeyPoint>>& pt_trips, const Eigen::Vector3d& t12, const Eigen::Matrix3d& K,
+                             double pix_thr, std::vector<Eigen::Vector3d>* pts3d_p, std::vector<std::vector<cv::KeyPoint>>* pt_trips_fin_p, std::vector<int>* wrong_lr_p)
+    {
+        cv::Mat P0 = cv::Mat::zeros(3, 4, CV_64FC1);
+        cv::Mat eye_mat = cv::Mat::eye(3, 3, CV_64FC1);
+        eye_mat.copyTo(P0(cv::Rect(0, 0, 3, 3)));
+        cv::Mat P1 = cv::Mat::zeros(3, 4, CV_64FC1);
+        eye_mat.copyTo(P1(cv::Rect(0, 0, 3, 3)));
+        cv::Mat t2_cv;
+        cv::eigen2cv(t12, t2_cv);
+        t2_cv.copyTo(P1(cv::Rect(3, 0, 1, 3)));
+
+        cv::Mat K_cv;
+        cv::eigen2cv(K, K_cv);
+        P0 = K_cv * P0;
+        P1 = K_cv * P1;
+
+        std::vector<cv::Point2d> pts_1, pts_2;
+        for (int i = 0; i < pt_trips.size(); i++) {
+            cv::Point2d pt1(pt_trips[i][0].pt);
+            cv::Point2d pt2(pt_trips[i][1].pt);
+            pts_1.push_back(pt1);
+            pts_2.push_back(pt2);
+        }
+        cv::Mat pts_3d;
+//    std::cout << " before triang" << std::endl;
+        cv::triangulatePoints(P0, P1, pts_1, pts_2, pts_3d);
+        std::vector<Eigen::Vector3d> pts3d;
+        std::vector<std::vector<cv::KeyPoint>> point_triplets_fin;
+        wrong_lr_p->clear();
+        for (int i = 0; i < pt_trips.size(); i++)
+        {
+            Eigen::Vector3d X;
+            X << pts_3d.at<double>(0, i), pts_3d.at<double>(1, i), pts_3d.at<double>(2, i);
+            X = X / pts_3d.at<double>(3, i);
+            Eigen::Vector3d Xc1 = X;
+            Xc1 = K * Xc1/ Xc1(2);
+            Eigen::Vector3d Xc2 = X + t12;
+            Xc2 = K * Xc2/Xc2(2);
+            Eigen::Vector3d Xc1_pred;
+            Xc1_pred << pt_trips[i][0].pt.x, pt_trips[i][0].pt.y, 1.0;
+            Eigen::Vector3d Xc2_pred;
+            Xc2_pred << pt_trips[i][1].pt.x, pt_trips[i][1].pt.y, 1.0;
+            double pe1 = (Xc1-Xc1_pred).norm();
+            double pe2 = (Xc2-Xc2_pred).norm();
+            if (isnanf(X.norm()) || X.norm() > 1e5)
+            {
+                continue;
+            }
+            if (pe1 < pix_thr && pe2 < pix_thr)
+            {
+                point_triplets_fin.push_back(pt_trips[i]);
+                pts3d.push_back(X);
+            } else {
+                wrong_lr_p->push_back(i);
+            }
+        }
+        *pts3d_p = pts3d;
+        *pt_trips_fin_p = point_triplets_fin;
+    }
+
+    bool Tracking::TrackReferenceSego()
+    {
+
+        if (!bSegoRecovery)
+        {
+            return Tracking::TrackReferenceKeyFrame();
+        }
+
+        // Compute Bag of Words vector
+        mCurrentFrame.ComputeBoW();
+
+        // We perform first an ORB matching with the reference keyframe
+        // If enough matches are found we setup a PnP solver
+        ORBmatcher matcher(0.7,true);
+        vector<MapPoint*> vpMapPointMatches, vpMapPointMatchesR;
+        std::vector<std::pair<cv::KeyPoint, cv::KeyPoint>> kps, kpsR;
+        int nmatches = matcher.SearchByBoWKP(mpReferenceKF,mCurrentFrame,kps,vpMapPointMatches,false);
+        int nmatches_right = matcher.SearchByBoWKP(mpReferenceKF,mCurrentFrame,kpsR,vpMapPointMatchesR,true);
+
+        if(nmatches+nmatches_right<7) {
+            std::cout << " low No. of matches " << nmatches+nmatches_right << std::endl;
+            return false;
+        }
+
+        //we form 4 sets of triplet matches between left-right-left  and right-left-right camera views,
+        // and then we run SEGOLoop/P3PLoop to estimate camera motion using RANSAC
+        cv::Mat Tcw;
+        Eigen::Matrix3d K;
+        cv::cv2eigen(mCurrentFrame.mK, K);
+        double thr = 10;
+        Eigen::Vector3d b(-mCurrentFrame.mb, 0, 0);
+
+        //we form left-right-left (0,1,2) matches
+        std::vector<std::vector<cv::KeyPoint>> set_lrl, set_lrl_fin;
+        for (size_t i = 0; i < vpMapPointMatches.size(); i++)
+        {
+            if (vpMapPointMatches[i])
+            {
+                std::vector<cv::KeyPoint> kp_vec{kps[i].first, kps[i].second, mCurrentFrame.mvKeys[i]};
+                set_lrl.push_back(kp_vec);
+            }
+        }
+        //we triangulate the features and filter out those not located well
+        std::vector<Eigen::Vector3d> pts3d_lrl;
+        std::vector<int> wrong_lr;
+        TriangulateLRPoints(set_lrl, b, K,thr, &pts3d_lrl, &set_lrl_fin, &wrong_lr);
+
+        //we form right-left-right (1,0,3) matches
+        std::vector<std::vector<cv::KeyPoint>> set_rlr, set_rlr_fin;
+        for (int i = 0; i < vpMapPointMatchesR.size(); i++)
+        {
+            if (vpMapPointMatchesR[i])
+            {
+                std::vector<cv::KeyPoint> kp_vec{kpsR[i].second, kpsR[i].first, mCurrentFrame.mvKeysRight[i]};
+                set_rlr.push_back(kp_vec);
+            }
+        }
+        //we triangulate the features and filter out those not located well
+        std::vector<Eigen::Vector3d> pts3d_rlr;
+        std::vector<int> wrong_rl;
+        TriangulateLRPoints(set_rlr, -b, K,thr, &pts3d_rlr, &set_rlr_fin, &wrong_rl);
+
+        std::vector<std::vector<std::vector<cv::KeyPoint>>> pt_trips_sets{set_lrl_fin, set_rlr_fin, std::vector<std::vector<cv::KeyPoint>>(), std::vector<std::vector<cv::KeyPoint>>()};
+        std::vector<std::vector<Eigen::Vector3d>> pts3d_for_trips{pts3d_lrl, pts3d_rlr, std::vector<Eigen::Vector3d>(), std::vector<Eigen::Vector3d>()};
+
+        RANSACLoop* sego;
+        if (!bUseP3P)
+        {
+            std::vector<std::vector<int>> tri_inds{std::vector<int>{0,1,2}, std::vector<int>{1,0,3},
+                                                   std::vector<int>{2,3,0}, std::vector<int>{3,2,1}};
+            sego = new SEGOLoop(pt_trips_sets, 0.99, 0.75, K, pts3d_for_trips, thr, tri_inds, b);
+        }  else {
+            if (pt_trips_sets[0].size() < 5)
+            {
+                return false;
+            }
+            sego = new P3PLoop(pt_trips_sets[0], 0.99, 0.75, K, pts3d_for_trips[0], thr);
+        }
+        sego->Iterate(cv::Mat());
+        //we decode and store the inliers
+        if (sego->inlier_cnt > 5)
+        {
+            Eigen::Matrix<float, 4, 4> Tf;
+            Tf.setIdentity();
+            Tf.block<3, 3>(0, 0) = sego->R_best.cast<float>();
+            Tf.block<3, 1>(0, 3) = sego->t_best.cast<float>();
+            cv::eigen2cv(Tf, Tcw);
+            mCurrentFrame.mvpMapPoints = vpMapPointMatches;
+            std::map<int, bool> isPointUsed;
+            for (size_t i = 0; i < vpMapPointMatches.size(); i++)
+            {
+                isPointUsed[i] = true;
+            }
+            for (int wi: wrong_lr)
+            {
+                isPointUsed[wi] = false;
+            }
+            int loc_ind = 0;
+            for (size_t i = 0; i < vpMapPointMatches.size(); i++)
+            {
+                if (isPointUsed[i])
+                {
+                    loc_ind++;
+                }
+            }
+            std::map<int, int> loc2glob_id;
+            int gi = 0;
+            for (size_t li = 0; li < set_lrl.size(); li++)
+            {
+                while (!isPointUsed[gi])
+                {
+                    gi++;
+                }
+                loc2glob_id[li] = gi;
+                gi++;
+            }
+            int inlier_cnt = 0;
+            for (int li = 0; li < set_lrl.size(); li++)
+            {
+                int gii = loc2glob_id[li];
+                if (sego->is_inlier[li])
+                {
+                    mCurrentFrame.mvpMapPoints[gii] = vpMapPointMatches[gii];
+                    inlier_cnt++;
+                } else {
+                    MapPoint* pMP = mCurrentFrame.mvpMapPoints[gii];
+                    if (!pMP)
+                    {
+                        continue;
+                    }
+                    mCurrentFrame.mvpMapPoints[gii] = static_cast<MapPoint *>(NULL);
+                    mCurrentFrame.mvbOutlier[gii]=false;
+                    pMP->mbTrackInView = false;
+                    pMP->mnLastFrameSeen = mCurrentFrame.mnId;
+                }
+            }
+        } else {
+            mCurrentFrame.mvpMapPoints = vpMapPointMatches;
+        }
+
+        if (Tcw.empty())
+        {
+            std::cout << " approx failed " << std::endl;
+            Tcw = cv::Mat();
+        }
+
+        if (!Tcw.empty())
+        {
+            mCurrentFrame.SetPose(Tcw * mpReferenceKF->GetPose());
+
+
+            ORBmatcher matcher(0.9,true);
+
+            // Update last frame pose according to its reference keyframe
+            // Create "visual odometry" points if in Localization Mode
+            fill(mCurrentFrame.mvpMapPoints.begin(),mCurrentFrame.mvpMapPoints.end(),static_cast<MapPoint*>(NULL));
+
+            // Project points seen in previous frame
+            int th;
+            if(mSensor!=System::STEREO)
+                th=15;
+            else
+                th=7;
+            int nmatches = matcher.SearchByProjection(mCurrentFrame,mLastFrame,th,mSensor==System::MONOCULAR);
+
+            // If few matches, uses a wider window search
+            if(nmatches<20)
+            {
+                fill(mCurrentFrame.mvpMapPoints.begin(),mCurrentFrame.mvpMapPoints.end(),static_cast<MapPoint*>(NULL));
+                nmatches = matcher.SearchByProjection(mCurrentFrame,mLastFrame,2*th,mSensor==System::MONOCULAR);
+            }
+
+        } else {
+            mCurrentFrame.mvpMapPoints = vpMapPointMatches;
+            if (!mLastFrame.mTcw.empty()) {
+                mCurrentFrame.SetPose(mLastFrame.mTcw);
+            }
+
+        }
+
+
+
+        Optimizer::PoseOptimization(&mCurrentFrame);
+
+        // Discard outliers
+        int nmatchesMap = 0;
+        for(int i =0; i<mCurrentFrame.N; i++)
+        {
+            if(mCurrentFrame.mvpMapPoints[i])
+            {
+                if(mCurrentFrame.mvbOutlier[i])
+                {
+                    MapPoint* pMP = mCurrentFrame.mvpMapPoints[i];
+
+                    mCurrentFrame.mvpMapPoints[i]=static_cast<MapPoint*>(NULL);
+                    mCurrentFrame.mvbOutlier[i]=false;
+                    pMP->mbTrackInView = false;
+                    pMP->mnLastFrameSeen = mCurrentFrame.mnId;
+                    nmatches--;
+                }
+                else if(mCurrentFrame.mvpMapPoints[i]->Observations()>0)
+                    nmatchesMap++;
+            }
+        }
+
+        return nmatchesMap>=10;
+    }
+
+
+
+
 
 bool Tracking::TrackWithMotionModel()
 {

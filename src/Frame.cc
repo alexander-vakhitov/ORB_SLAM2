@@ -16,6 +16,14 @@
 *
 * You should have received a copy of the GNU General Public License
 * along with ORB-SLAM2. If not, see <http://www.gnu.org/licenses/>.
+*
+* (C) 2018 Alexander Vakhitov <alexander.vakhitov at gmail dot com>
+* (Skolkovo Institute for Science and Technology, Samsung AI Center Moscow)
+* Added index vectors l2r, r2l to store left-right feature matching,
+* mFeatVecRight and mBowVecRight to match features from the right frame,
+* mGridRight to assist reprojection-based matching for the right frame;
+* modified AssignFeaturesToGrid, GetFeaturesInArea, ComputeBoW and
+* ComputeStereoMatches to use the right frame features
 */
 
 #include "Frame.h"
@@ -47,7 +55,8 @@ Frame::Frame(const Frame &frame)
      mpReferenceKF(frame.mpReferenceKF), mnScaleLevels(frame.mnScaleLevels),
      mfScaleFactor(frame.mfScaleFactor), mfLogScaleFactor(frame.mfLogScaleFactor),
      mvScaleFactors(frame.mvScaleFactors), mvInvScaleFactors(frame.mvInvScaleFactors),
-     mvLevelSigma2(frame.mvLevelSigma2), mvInvLevelSigma2(frame.mvInvLevelSigma2)
+     mvLevelSigma2(frame.mvLevelSigma2), mvInvLevelSigma2(frame.mvInvLevelSigma2),
+     l2r(frame.l2r), r2l(frame.r2l), mBowVecRight(frame.mBowVecRight), mFeatVecRight(frame.mFeatVecRight)
 {
     for(int i=0;i<FRAME_GRID_COLS;i++)
         for(int j=0; j<FRAME_GRID_ROWS; j++)
@@ -114,6 +123,7 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeSt
     mb = mbf/fx;
 
     AssignFeaturesToGrid();
+    AssignFeaturesToGrid(true);
 }
 
 Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const double &timeStamp, ORBextractor* extractor,ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth)
@@ -227,20 +237,30 @@ Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extra
     AssignFeaturesToGrid();
 }
 
-void Frame::AssignFeaturesToGrid()
+void Frame::AssignFeaturesToGrid(bool is_right)
 {
-    int nReserve = 0.5f*N/(FRAME_GRID_COLS*FRAME_GRID_ROWS);
+   const int N_ = (is_right) ? mvKeysRight.size() : N;
+   int nReserve = 0.5f*N_/(FRAME_GRID_COLS*FRAME_GRID_ROWS);
     for(unsigned int i=0; i<FRAME_GRID_COLS;i++)
         for (unsigned int j=0; j<FRAME_GRID_ROWS;j++)
-            mGrid[i][j].reserve(nReserve);
+        {
+            (is_right)? mGridRight[i][j].reserve(nReserve) : mGrid[i][j].reserve(nReserve);
+        }
 
-    for(int i=0;i<N;i++)
+    for(int i=0;i<N_;i++)
     {
-        const cv::KeyPoint &kp = mvKeysUn[i];
+        const cv::KeyPoint &kp = (is_right) ? mvKeysRight[i] : mvKeysUn[i];
+
+        if (is_right && r2l[i] < 0)
+        {
+            continue;
+        }
 
         int nGridPosX, nGridPosY;
         if(PosInGrid(kp,nGridPosX,nGridPosY))
-            mGrid[nGridPosX][nGridPosY].push_back(i);
+        {
+            (is_right) ? mGridRight[nGridPosX][nGridPosY].push_back(r2l[i]) : mGrid[nGridPosX][nGridPosY].push_back(i);
+        }
     }
 }
 
@@ -323,8 +343,7 @@ bool Frame::isInFrustum(MapPoint *pMP, float viewingCosLimit)
 
     return true;
 }
-
-vector<size_t> Frame::GetFeaturesInArea(const float &x, const float  &y, const float  &r, const int minLevel, const int maxLevel) const
+vector<size_t> Frame::GetFeaturesInArea(const float &x, const float  &y, const float  &r, const int minLevel, const int maxLevel, bool is_right) const
 {
     vector<size_t> vIndices;
     vIndices.reserve(N);
@@ -351,13 +370,13 @@ vector<size_t> Frame::GetFeaturesInArea(const float &x, const float  &y, const f
     {
         for(int iy = nMinCellY; iy<=nMaxCellY; iy++)
         {
-            const vector<size_t> vCell = mGrid[ix][iy];
+            const vector<size_t> vCell = (is_right) ? mGridRight[ix][iy] : mGrid[ix][iy];
             if(vCell.empty())
                 continue;
 
             for(size_t j=0, jend=vCell.size(); j<jend; j++)
             {
-                const cv::KeyPoint &kpUn = mvKeysUn[vCell[j]];
+                const cv::KeyPoint &kpUn = (is_right) ? mvKeysRight[l2r[vCell[j]]] : mvKeysUn[vCell[j]];
                 if(bCheckLevels)
                 {
                     if(kpUn.octave<minLevel)
@@ -394,10 +413,15 @@ bool Frame::PosInGrid(const cv::KeyPoint &kp, int &posX, int &posY)
 
 void Frame::ComputeBoW()
 {
-    if(mBowVec.empty())
-    {
+    if(mBowVec.empty()) {
         vector<cv::Mat> vCurrentDesc = Converter::toDescriptorVector(mDescriptors);
-        mpORBvocabulary->transform(vCurrentDesc,mBowVec,mFeatVec,4);
+        mpORBvocabulary->transform(vCurrentDesc, mBowVec, mFeatVec, 4);
+    }
+
+    if (mBowVecRight.empty())
+    {
+        vector<cv::Mat> vCurrentDescRight = Converter::toDescriptorVector(mDescriptorsRight);
+        mpORBvocabulary->transform(vCurrentDescRight,mBowVecRight,mFeatVecRight,4);
     }
 }
 
@@ -467,6 +491,9 @@ void Frame::ComputeStereoMatches()
 {
     mvuRight = vector<float>(N,-1.0f);
     mvDepth = vector<float>(N,-1.0f);
+
+    l2r = vector<int>(N,-1);
+    r2l = vector<int>(mvKeysRight.size(),-1);
 
     const int thOrbDist = (ORBmatcher::TH_HIGH+ORBmatcher::TH_LOW)/2;
 
@@ -619,6 +646,9 @@ void Frame::ComputeStereoMatches()
                 mvDepth[iL]=mbf/disparity;
                 mvuRight[iL] = bestuR;
                 vDistIdx.push_back(pair<int,int>(bestDist,iL));
+
+                l2r[iL] = bestIdxR;
+                r2l[bestIdxR] = iL;
             }
         }
     }
@@ -635,6 +665,11 @@ void Frame::ComputeStereoMatches()
         {
             mvuRight[vDistIdx[i].second]=-1;
             mvDepth[vDistIdx[i].second]=-1;
+
+            int r_ind = l2r[vDistIdx[i].second];
+            r2l[r_ind] = -1;
+            l2r[vDistIdx[i].second] = -1;
+
         }
     }
 }

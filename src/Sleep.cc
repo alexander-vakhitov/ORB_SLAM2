@@ -1,6 +1,6 @@
 // sleep
 // Copyright (c) 2018 Alexander Vakhitov <alexander.vakhitov@gmail.com>
-// Redistribution and use is allowed according to the terms of the 2-clause BSD license.
+// Redistribution and use is allowed according to the terms of the GPL v3 license.
 
 #include "Sleep.h"
 #include <time.h>

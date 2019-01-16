@@ -115,6 +115,13 @@ public:
 
     void Reset();
 
+    std::vector<eTrackingState> tracker_state_history;
+
+    bool bSegoRecovery = false;
+    bool bUseP3P = false;
+
+    bool useviewer = true;
+
 protected:
 
     // Main tracking function. It is independent of the input sensor.
@@ -131,6 +138,9 @@ protected:
     bool TrackReferenceKeyFrame();
     void UpdateLastFrame();
     bool TrackWithMotionModel();
+
+    bool TrackWithMotionModelSego();
+    bool TrackReferenceSego();
 
     bool Relocalization();
 

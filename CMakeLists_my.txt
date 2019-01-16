@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 2.8)
 project(ORB_SLAM2)
 
-set(SEGO_INCLUDE "<PATH TO SEGO>")
-set(SEGO_BUILD "<PATH TO SEGO LIB>")
+set(SEGO_INCLUDE "/home/alexander/soft/sego/sego")
+set(SEGO_BUILD "/home/alexander/soft/sego/sego/lib")
 
 IF(NOT CMAKE_BUILD_TYPE)
   SET(CMAKE_BUILD_TYPE Release)
