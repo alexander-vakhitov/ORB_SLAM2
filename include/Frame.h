@@ -86,7 +86,8 @@ public:
     // Compute the cell of a keypoint (return false if outside the grid)
     bool PosInGrid(const cv::KeyPoint &kp, int &posX, int &posY);
 
-    vector<size_t> GetFeaturesInArea(const float &x, const float  &y, const float  &r, const int minLevel=-1, const int maxLevel=-1) const;
+    //get features loated in a certain part of the screen
+    vector<size_t> GetFeaturesInArea(const float &x, const float  &y, const float  &r, const int minLevel=-1, const int maxLevel=-1, bool is_right = false) const;
 
     // Search a match for each keypoint in the left image to a keypoint in the right image.
     // If there is a match, depth is computed and the right coordinate associated to the left keypoint is stored.
@@ -137,6 +138,11 @@ public:
     std::vector<cv::KeyPoint> mvKeys, mvKeysRight;
     std::vector<cv::KeyPoint> mvKeysUn;
 
+    //indices of left-to-right and right-to-left point matches
+    std::vector<int> l2r;
+    std::vector<int> r2l;
+
+
     // Corresponding stereo coordinate and depth for each keypoint.
     // "Monocular" keypoints have a negative value.
     std::vector<float> mvuRight;
@@ -145,6 +151,11 @@ public:
     // Bag of Words Vector structures.
     DBoW2::BowVector mBowVec;
     DBoW2::FeatureVector mFeatVec;
+
+    //structures for matching the right frame features
+    DBoW2::BowVector mBowVecRight;
+    DBoW2::FeatureVector mFeatVecRight;
+
 
     // ORB descriptor, each row associated to a keypoint.
     cv::Mat mDescriptors, mDescriptorsRight;
@@ -159,6 +170,8 @@ public:
     static float mfGridElementWidthInv;
     static float mfGridElementHeightInv;
     std::vector<std::size_t> mGrid[FRAME_GRID_COLS][FRAME_GRID_ROWS];
+    std::vector<std::size_t> mGridRight[FRAME_GRID_COLS][FRAME_GRID_ROWS];
+
 
     // Camera pose.
     cv::Mat mTcw;
@@ -199,7 +212,7 @@ private:
     void ComputeImageBounds(const cv::Mat &imLeft);
 
     // Assign keypoints to the grid for speed up feature matching (called in the constructor).
-    void AssignFeaturesToGrid();
+    void AssignFeaturesToGrid(bool is_right = false);
 
     // Rotation, translation and camera center
     cv::Mat mRcw;
