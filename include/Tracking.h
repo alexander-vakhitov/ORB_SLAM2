@@ -118,7 +118,6 @@ public:
     std::vector<eTrackingState> tracker_state_history;
 
     bool bSegoRecovery = false;
-    bool bUseP3P = false;
 
     bool useviewer = true;
 

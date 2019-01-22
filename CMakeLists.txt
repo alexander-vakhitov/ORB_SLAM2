@@ -1,8 +1,7 @@
 cmake_minimum_required(VERSION 2.8)
 project(ORB_SLAM2)
 
-set(SEGO_INCLUDE "/home/alexander/soft/sego/sego")
-set(SEGO_BUILD "/home/alexander/soft/sego/sego/lib")
+set(SEGO_INCLUDE "<PATH TO SEGO>")
 
 IF(NOT CMAKE_BUILD_TYPE)
   SET(CMAKE_BUILD_TYPE Release)
@@ -75,8 +74,6 @@ src/Viewer.cc
 src/Sleep.cc
 src/RANSACLoop.cc
 src/SEGOLoop.cc
-src/P3PLoop.cc
-src/P3P.cc
 )
 
 target_link_libraries(${PROJECT_NAME}
@@ -85,10 +82,9 @@ ${EIGEN3_LIBS}
 ${Pangolin_LIBRARIES}
 ${PROJECT_SOURCE_DIR}/Thirdparty/DBoW2/lib/libDBoW2.so
 ${PROJECT_SOURCE_DIR}/Thirdparty/g2o/lib/libg2o.so
-gsl
 blas
 lapack
-${SEGO_BUILD}/libsego.so
+${SEGO_INCLUDE}/lib/libsego.so
 )
 
 # Build examples

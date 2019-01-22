@@ -44,7 +44,6 @@
 #include<mutex>
 #include <opencv/cxeigen.hpp>
 #include <include/SEGOLoop.h>
-#include <include/P3PLoop.h>
 
 #include "Sleep.h"
 
@@ -158,18 +157,8 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
     }
 
     bSegoRecovery = (int)fSettings["SEGORecovery"];
-    bUseP3P = (int)fSettings["IsP3P"];
 
-    cout << endl  << "SEGO Parameters: " << endl;
     cout << "- Use stereo egomotion recovery: " << bSegoRecovery << endl;
-    if (bSegoRecovery)
-    {
-        if (bUseP3P) {
-            cout << "- Use P3P " << endl;
-        } else {
-            cout << "- Use SEGO " << endl;
-        }
-    }
 
 }
 
@@ -1030,19 +1019,10 @@ void Tracking::UpdateLastFrame()
         std::vector<std::vector<std::vector<cv::KeyPoint>>> pt_trips_sets{set_lrl_fin, set_rlr_fin, std::vector<std::vector<cv::KeyPoint>>(), std::vector<std::vector<cv::KeyPoint>>()};
         std::vector<std::vector<Eigen::Vector3d>> pts3d_for_trips{pts3d_lrl, pts3d_rlr, std::vector<Eigen::Vector3d>(), std::vector<Eigen::Vector3d>()};
 
-        RANSACLoop* sego;
-        if (!bUseP3P)
-        {
-            std::vector<std::vector<int>> tri_inds{std::vector<int>{0,1,2}, std::vector<int>{1,0,3},
-                                                   std::vector<int>{2,3,0}, std::vector<int>{3,2,1}};
-            sego = new SEGOLoop(pt_trips_sets, 0.99, 0.75, K, pts3d_for_trips, thr, tri_inds, b);
-        }  else {
-            if (pt_trips_sets[0].size() < 5)
-            {
-                return false;
-            }
-            sego = new P3PLoop(pt_trips_sets[0], 0.99, 0.75, K, pts3d_for_trips[0], thr);
-        }
+
+        std::vector<std::vector<int>> tri_inds{std::vector<int>{0,1,2}, std::vector<int>{1,0,3},
+                                               std::vector<int>{2,3,0}, std::vector<int>{3,2,1}};
+        RANSACLoop* sego = new SEGOLoop(pt_trips_sets, 0.99, 0.75, K, pts3d_for_trips, thr, tri_inds, b);
         sego->Iterate(cv::Mat());
         //we decode and store the inliers
         if (sego->inlier_cnt > 5)
