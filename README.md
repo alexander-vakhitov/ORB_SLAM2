@@ -1,8 +1,8 @@
 # ORB-SLAM2+SEGO
 **Authors:** [Raul Mur-Artal](http://webdiis.unizar.es/~raulmur/), [Juan D. Tardos](http://webdiis.unizar.es/~jdtardos/), [J. M. M. Montiel](http://webdiis.unizar.es/~josemari/) and [Dorian Galvez-Lopez](http://doriangalvez.com/) ([DBoW2](https://github.com/dorian3d/DBoW2))   
-**Modifiers:** [Alexander Vakhitov]: Added SEGO-based restart after tracking failure
+**Modifiers:** [Alexander Vakhitov]: Added SEGO support to increase **Stereo** tracking robustness: system works now for KITTI sequences with 5 fps.
 
-**1 Jan 2019** SEGO restart added
+**1 Jan 2019** SEGO added
 
 **13 Jan 2017**: OpenCV 3 and Eigen 3.3 are now supported.
 
@@ -78,6 +78,9 @@ Required by g2o (see below). Download and install instructions can be found at: 
 ## DBoW2 and g2o (Included in Thirdparty folder)
 We use modified versions of the [DBoW2](https://github.com/dorian3d/DBoW2) library to perform place recognition and [g2o](https://github.com/RainerKuemmerle/g2o) library to perform non-linear optimizations. Both modified libraries (which are BSD) are included in the *Thirdparty* folder.
 
+## SEGO
+We added [SEGO](https://github.com/alexander-vakhitov/sego/) support. Please build it and provide the path to 'sego.h' in the CMakelists.txt.
+
 ## ROS (optional)
 We provide some examples to process the live input of a monocular, stereo or RGB-D camera using [ROS](ros.org). Building these examples is optional. In case you want to use ROS, a version Hydro or newer is needed.
 
@@ -132,6 +135,15 @@ This will create **libORB_SLAM2.so**  at *lib* folder and the executables **mono
 
 # 5. Stereo Examples
 
+## KITTI Dataset, 5 FPS
+Normally, KITTI sequences have 10 fps. We use 5 fps to imitate faster motion. 
+1. Download the dataset (grayscale images) from http://www.cvlibs.net/datasets/kitti/eval_odometry.php 
+
+2. Execute the following command. Change `KITTIX.yaml`to KITTI00-02.yaml, KITTI03.yaml or KITTI04-12.yaml for sequence 0 to 2, 3, and 4 to 12 respectively. Change `PATH_TO_DATASET_FOLDER` to the uncompressed dataset folder. Change `SEQUENCE_NUMBER` to 00, 01, 02,.., 11. 
+```
+./Examples/Stereo/stereo_kitti_half Vocabulary/ORBvoc.txt Examples/Stereo/KITTIX.yaml PATH_TO_DATASET_FOLDER/dataset/sequences/SEQUENCE_NUMBER
+```
+
 ## KITTI Dataset
 
 1. Download the dataset (grayscale images) from http://www.cvlibs.net/datasets/kitti/eval_odometry.php 
@@ -140,6 +152,7 @@ This will create **libORB_SLAM2.so**  at *lib* folder and the executables **mono
 ```
 ./Examples/Stereo/stereo_kitti Vocabulary/ORBvoc.txt Examples/Stereo/KITTIX.yaml PATH_TO_DATASET_FOLDER/dataset/sequences/SEQUENCE_NUMBER
 ```
+
 
 ## EuRoC Dataset
 
