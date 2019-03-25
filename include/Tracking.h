@@ -37,8 +37,11 @@
 #include "Initializer.h"
 #include "MapDrawer.h"
 #include "System.h"
+#include "PnPUsolver2.h"
+#include "PnPsolver.h"
 
 #include <mutex>
+
 
 namespace ORB_SLAM2
 {
@@ -121,6 +124,8 @@ public:
 
     bool useviewer = true;
 
+    bool bUseUncertainty = true;
+
 protected:
 
     // Main tracking function. It is independent of the input sensor.
@@ -152,6 +157,9 @@ protected:
 
     bool NeedNewKeyFrame();
     void CreateNewKeyFrame();
+
+    PnPUsolver2* SetupPnPU(const Frame &F, const vector<MapPoint*> &vpMapPointMatches);
+    PnPsolver* SetupPnP(const Frame &F, const vector<MapPoint*> &vpMapPointMatches);
 
     // In case of performing only localization, this flag is true when there are no matches to
     // points in the map. Still tracking will continue if there are enough matches with temporal points.
@@ -223,6 +231,8 @@ protected:
     bool mbRGB;
 
     list<MapPoint*> mlpTemporalPoints;
+
+    int mnPnpMode;
 };
 
 } //namespace ORB_SLAM

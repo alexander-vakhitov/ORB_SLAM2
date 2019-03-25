@@ -43,7 +43,9 @@ public:
     MapPoint(const cv::Mat &Pos,  Map* pMap, Frame* pFrame, const int &idxF);
 
     void SetWorldPos(const cv::Mat &Pos);
+    void SetWorldCov(const cv::Mat &Cov);
     cv::Mat GetWorldPos();
+    cv::Mat GetWorldCov();
 
     cv::Mat GetNormal();
     KeyFrame* GetReferenceKeyFrame();
@@ -116,6 +118,7 @@ protected:
 
      // Position in absolute coordinates
      cv::Mat mWorldPos;
+     cv::Mat mWorldCov;
 
      // Keyframes observing the point and associated index in keyframe
      std::map<KeyFrame*,size_t> mObservations;

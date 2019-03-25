@@ -36,6 +36,9 @@ MapPoint::MapPoint(const cv::Mat &Pos, KeyFrame *pRefKF, Map* pMap):
     mpReplaced(static_cast<MapPoint*>(NULL)), mfMinDistance(0), mfMaxDistance(0), mpMap(pMap)
 {
     Pos.copyTo(mWorldPos);
+
+    mWorldCov = cv::Mat::zeros(3, 3, CV_32F);
+
     mNormalVector = cv::Mat::zeros(3,1,CV_32F);
 
     // MapPoints can be created from Tracking and Local Mapping. This mutex avoid conflicts with id.
@@ -50,6 +53,9 @@ MapPoint::MapPoint(const cv::Mat &Pos, Map* pMap, Frame* pFrame, const int &idxF
     mnFound(1), mbBad(false), mpReplaced(NULL), mpMap(pMap)
 {
     Pos.copyTo(mWorldPos);
+
+    mWorldCov = cv::Mat::zeros(3, 3, CV_32F);
+
     cv::Mat Ow = pFrame->GetCameraCenter();
     mNormalVector = mWorldPos - Ow;
     mNormalVector = mNormalVector/cv::norm(mNormalVector);
@@ -77,11 +83,32 @@ void MapPoint::SetWorldPos(const cv::Mat &Pos)
     Pos.copyTo(mWorldPos);
 }
 
+void MapPoint::SetWorldCov(const cv::Mat &Cov)
+{
+    unique_lock<mutex> lock2(mGlobalMutex);
+    unique_lock<mutex> lock(mMutexPos);
+    Cov.copyTo(mWorldCov);
+}
+
+
 cv::Mat MapPoint::GetWorldPos()
 {
     unique_lock<mutex> lock(mMutexPos);
     return mWorldPos.clone();
 }
+
+cv::Mat MapPoint::GetWorldCov()
+{
+    unique_lock<mutex> lock(mMutexPos);
+    if (mWorldCov.cols > 0)
+    {
+        return mWorldCov.clone();
+    } else {
+        return cv::Mat();
+    }
+
+}
+
 
 cv::Mat MapPoint::GetNormal()
 {

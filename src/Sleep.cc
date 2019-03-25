@@ -8,9 +8,9 @@
 
 void sleep_ms(int microsec)
 {
-    int sec_int = (microsec)/100000;
+    int sec_int = (microsec)/1000000;
     struct timespec req = {0};
     req.tv_sec = sec_int;
-    req.tv_nsec = (microsec % 100000L) * 1000L;
+    req.tv_nsec = (microsec % 1000000L) * 1000L;
     nanosleep(&req, (struct timespec *)NULL);
 }

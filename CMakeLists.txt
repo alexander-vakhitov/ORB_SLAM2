@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 2.8)
 project(ORB_SLAM2)
 
-set(SEGO_INCLUDE "<PATH TO SEGO>")
+set(SEGO_INCLUDE "/home/alexander/materials/pnp3d/segoexp/sego")
 
 IF(NOT CMAKE_BUILD_TYPE)
   SET(CMAKE_BUILD_TYPE Release)
@@ -9,8 +9,8 @@ ENDIF()
 
 MESSAGE("Build type: " ${CMAKE_BUILD_TYPE})
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}  -Wall  -O3 -march=native ")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall   -O3 -march=native")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}  -Wall  -O3 -march=native -Wno-deprecated-declarations")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall   -O3 -march=native -Wno-deprecated-declarations")
 
 # Check C++11 or C++0x support
 include(CheckCXXCompilerFlag)
@@ -66,6 +66,8 @@ src/Map.cc
 src/MapDrawer.cc
 src/Optimizer.cc
 src/PnPsolver.cc
+src/PnPUsolver2.cpp
+
 src/Frame.cc
 src/KeyFrameDatabase.cc
 src/Sim3Solver.cc
@@ -74,7 +76,12 @@ src/Viewer.cc
 src/Sleep.cc
 src/RANSACLoop.cc
 src/SEGOLoop.cc
-)
+src/PnPUsolver.cc
+src/pnp3d.cpp
+src/gradient.cpp
+src/hessian.cpp
+src/solver_hesch.cpp
+src/vgl.cc)
 
 target_link_libraries(${PROJECT_NAME}
 ${OpenCV_LIBS}

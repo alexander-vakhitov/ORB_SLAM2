@@ -65,3 +65,4 @@ Viewer.ViewpointZ: -0.1
 Viewer.ViewpointF: 2000
 
 SEGORecovery: 1
+PnPmode: 0

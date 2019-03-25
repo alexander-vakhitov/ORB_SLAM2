@@ -224,6 +224,19 @@ void Optimizer::BundleAdjustment(const vector<KeyFrame *> &vpKFs, const vector<M
         if(nLoopKF==0)
         {
             pMP->SetWorldPos(Converter::toCvMat(vPoint->estimate()));
+
+            if (vPoint->hessianData())
+            {
+                const Eigen::Matrix3d A = vPoint->A();
+                Eigen::Matrix3d Ainv = Eigen::Matrix3d::Zero();
+                if (fabs(A.determinant())>1e-6)
+                {
+                    Ainv = A.inverse();
+                }
+                cv::Mat Ainv_cv = Converter::toCvMat(Ainv);
+                pMP->SetWorldCov(Ainv_cv);
+            }
+
             pMP->UpdateNormalAndDepth();
         }
         else
@@ -773,6 +786,18 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
         MapPoint* pMP = *lit;
         g2o::VertexSBAPointXYZ* vPoint = static_cast<g2o::VertexSBAPointXYZ*>(optimizer.vertex(pMP->mnId+maxKFid+1));
         pMP->SetWorldPos(Converter::toCvMat(vPoint->estimate()));
+
+        if (vPoint->hessianData())
+        {
+            const Eigen::Matrix3d A = vPoint->A();
+            Eigen::Matrix3d Ainv = Eigen::Matrix3d::Zero();
+            if (fabs(A.determinant())>1e-6)
+            {
+                Ainv = A.inverse();
+            }
+            cv::Mat Ainv_cv = Converter::toCvMat(Ainv);
+            pMP->SetWorldCov(Ainv_cv);
+        }
         pMP->UpdateNormalAndDepth();
     }
 }

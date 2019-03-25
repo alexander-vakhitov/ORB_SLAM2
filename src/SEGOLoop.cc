@@ -194,7 +194,7 @@ void SEGOLoop::DrawInliers(Mat img) {
     int gpi = 0;
     Scalar sego_color(0,0,255);
     for (int ti = 0; ti < tri_inds.size(); ti++) {
-        for (int pi = 0; pi < pt_triplet_colls[ti].size(); pi++) {
+        for (size_t pi = 0; pi < pt_triplet_colls[ti].size(); pi++) {
             if (is_inlier[gpi]) {
                 if (vis_p.at<uchar>(gpi, 0) == 1) {
                     Vec2d& pt_cv = p_projs.at<Vec2d>(gpi, 0);

@@ -55,7 +55,7 @@ int main(int argc, char **argv)
     const int nImages = vstrImageLeft.size();
 
     // Create SLAM system. It initializes all system threads and gets ready to process frames.
-    ORB_SLAM2::System SLAM(argv[1],argv[2],ORB_SLAM2::System::STEREO,true);
+    ORB_SLAM2::System SLAM(argv[1],argv[2],ORB_SLAM2::System::STEREO,false);
 
     // Vector for tracking time statistics
     vector<float> vTimesTrack;
@@ -67,7 +67,10 @@ int main(int argc, char **argv)
 
     // Main loop
     cv::Mat imLeft, imRight;
-    for(int ni=0; ni<nImages; ni++)
+
+    int nCycles = nImages;
+
+    for(int ni=0; ni<nCycles; ni++)
     {
         if (ni % 2 == 1)
         {
@@ -115,9 +118,60 @@ int main(int argc, char **argv)
             sleep_ms((T-ttrack)*1e6);
     }
 
+    SLAM.ActivateLocalizationMode();
+
+    for (int i = 0; i < 10; i++)
+        std::cout << "SLAM STOP" << std::endl;
+
+    sleep_ms(10e6);
+
+    for (int i = 0; i < 10; i++)
+        std::cout << " RELOC START " << nCycles << std::endl;
+
+    std::ofstream relocTrajLog("RelocalizationTrajectory.txt");
+
+    for(int ni=0; ni<nCycles; ni++)
+    {
+        if (ni % 2 == 0) {
+            continue;
+        }
+
+        imLeft = cv::imread(vstrImageLeft[ni],CV_LOAD_IMAGE_UNCHANGED);
+        imRight = cv::imread(vstrImageRight[ni],CV_LOAD_IMAGE_UNCHANGED);
+        double tframe = vTimestamps[ni];
+
+        if(imLeft.empty())
+        {
+            cerr << endl << "Failed to load image at: "
+                 << string(vstrImageLeft[ni]) << endl;
+            return 1;
+        }
+
+        cv::Mat Tcw = SLAM.TrackStereo(imLeft,imRight,tframe);
+
+        std::cout << " reloc for " << ni << " " << Tcw.cols << " " << Tcw.rows << std::endl;
+
+        if (Tcw.cols == 0)
+        {
+            Tcw = cv::Mat::eye(4, 4, CV_32F);
+        }
+
+        for (int ri = 0; ri < 3; ri++)
+        {
+            for (int ci = 0; ci < 4; ci++)
+            {
+                relocTrajLog << Tcw.at<float>(ri, ci) << " ";
+            }
+        }
+        relocTrajLog << std::endl;
+    }
+
+    relocTrajLog.flush();
+
     // Stop all threads
     SLAM.Shutdown();
 
+//    return 0;
     // Tracking time statistics
     sort(vTimesTrack.begin(),vTimesTrack.end());
     float totaltime = 0;
