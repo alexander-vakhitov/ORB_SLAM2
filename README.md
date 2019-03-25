@@ -2,6 +2,8 @@
 **Authors:** [Raul Mur-Artal](http://webdiis.unizar.es/~raulmur/), [Juan D. Tardos](http://webdiis.unizar.es/~jdtardos/), [J. M. M. Montiel](http://webdiis.unizar.es/~josemari/) and [Dorian Galvez-Lopez](http://doriangalvez.com/) ([DBoW2](https://github.com/dorian3d/DBoW2))   
 **Modifiers:** [Alexander Vakhitov]: Added SEGO support to increase **Stereo** tracking robustness: system works now for KITTI sequences with 5 fps.
 
+**Important** To run in a SEGO-enhanced mode, add a line "SEGORecovery: 1" to a .yaml settings file
+
 **1 Jan 2019** SEGO added
 
 **13 Jan 2017**: OpenCV 3 and Eigen 3.3 are now supported.
@@ -136,7 +138,7 @@ This will create **libORB_SLAM2.so**  at *lib* folder and the executables **mono
 # 5. Stereo Examples
 
 ## KITTI Dataset, 5 FPS
-Normally, KITTI sequences have 10 fps. We use 5 fps to imitate faster motion. 
+Normally, KITTI sequences have 10 fps. We use 5 fps to imitate faster motion. To run in a SEGO-enhanced mode, add a line "SEGORecovery: 1" to a .yaml settings file.
 1. Download the dataset (grayscale images) from http://www.cvlibs.net/datasets/kitti/eval_odometry.php 
 
 2. Execute the following command. Change `KITTIX.yaml`to KITTI00-02.yaml, KITTI03.yaml or KITTI04-12.yaml for sequence 0 to 2, 3, and 4 to 12 respectively. Change `PATH_TO_DATASET_FOLDER` to the uncompressed dataset folder. Change `SEQUENCE_NUMBER` to 00, 01, 02,.., 11. 
