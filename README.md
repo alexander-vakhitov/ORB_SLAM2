@@ -32,35 +32,7 @@ alt="ORB-SLAM2" width="240" height="180" border="10" /></a>
 
 # 1. License
 
-ORB-SLAM2 is released under a [GPLv3 license](https://github.com/raulmur/ORB_SLAM2/blob/master/License-gpl.txt). For a list of all code/library dependencies (and associated licenses), please see [Dependencies.md](https://github.com/raulmur/ORB_SLAM2/blob/master/Dependencies.md).
-
-For a closed-source version of ORB-SLAM2 for commercial purposes, please contact the authors: orbslam (at) unizar (dot) es.
-
-If you use ORB-SLAM2 (Monocular) in an academic work, please cite:
-
-    @article{murTRO2015,
-      title={{ORB-SLAM}: a Versatile and Accurate Monocular {SLAM} System},
-      author={Mur-Artal, Ra\'ul, Montiel, J. M. M. and Tard\'os, Juan D.},
-      journal={IEEE Transactions on Robotics},
-      volume={31},
-      number={5},
-      pages={1147--1163},
-      doi = {10.1109/TRO.2015.2463671},
-      year={2015}
-     }
-
-if you use ORB-SLAM2 (Stereo or RGB-D) in an academic work, please cite:
-
-    @article{murORB2,
-      title={{ORB-SLAM2}: an Open-Source {SLAM} System for Monocular, Stereo and {RGB-D} Cameras},
-      author={Mur-Artal, Ra\'ul and Tard\'os, Juan D.},
-      journal={IEEE Transactions on Robotics},
-      volume={33},
-      number={5},
-      pages={1255--1262},
-      doi = {10.1109/TRO.2017.2705103},
-      year={2017}
-     }
+ORB_SLAM2_SEGO is released under a [GPLv3 license](https://github.com/raulmur/ORB_SLAM2/blob/master/License-gpl.txt). For a list of all code/library dependencies (and associated licenses), please see [Dependencies.md](https://github.com/raulmur/ORB_SLAM2/blob/master/Dependencies.md).
 
 # 2. Prerequisites
 We have tested the library in **Ubuntu 12.04**, **14.04** and **16.04**, but it should be easy to compile in other platforms. A powerful computer (e.g. i7) will ensure real-time performance and provide more stable and accurate results.
@@ -86,21 +58,26 @@ We use modified versions of the [DBoW2](https://github.com/dorian3d/DBoW2) libra
 ## ROS (optional)
 We provide some examples to process the live input of a monocular, stereo or RGB-D camera using [ROS](ros.org). Building these examples is optional. In case you want to use ROS, a version Hydro or newer is needed.
 
-# 3. Building ORB-SLAM2 library and examples
+# 3. Building SEGO-SLAM library and examples
 
 Clone the repository:
 ```
-git clone https://github.com/raulmur/ORB_SLAM2.git ORB_SLAM2
+git clone https://github.com/alexandervakhitov/ORB_SLAM2_SEGO.git ORB_SLAM2_SEGO
 ```
+Clone the SEGO library 
+```
+git clone https://github.com/alexandervakhitov/sego.git ORB_SLAM2_SEGO
+```
+Modify the ORB_SLAM2_SEGO/CMakeLists.txt: replace <SEGO DIR> with a path to the SEgo library cloned at the previous step.
 
 We provide a script `build.sh` to build the *Thirdparty* libraries and *ORB-SLAM2*. Please make sure you have installed all required dependencies (see section 2). Execute:
 ```
-cd ORB_SLAM2
+cd ORB_SLAM2_SEGO
 chmod +x build.sh
 ./build.sh
 ```
 
-This will create **libORB_SLAM2.so**  at *lib* folder and the executables **mono_tum**, **mono_kitti**, **rgbd_tum**, **stereo_kitti**, **mono_euroc** and **stereo_euroc** in *Examples* folder.
+This will create **libORB_SLAM2.so**  at *lib* folder and the executable **stereo_kitti_half** which demonstrates the experiment from the ECCV 2018 paper on stereo egomoton. The experiments from the original ORB_SLAM2 are also built: **mono_tum**, **mono_kitti**, **rgbd_tum**, **stereo_kitti**, **mono_euroc** and **stereo_euroc** in *Examples* folder.
 
 # 4. Monocular Examples
 
