@@ -99,6 +99,12 @@ public:
     // Backprojects a keypoint (if stereo/depth info available) into 3D world coordinates.
     cv::Mat UnprojectStereo(const int &i);
 
+    cv::Mat UnprojectCov(const int &i);
+
+    static cv::Mat UnprojectPointCovFromParams(float z, float x, float y, float sigma_x_2,
+                                               float cx, float cy, float b, float f, const cv::Mat& Rwc);
+
+
 public:
     // Vocabulary used for relocalization.
     ORBVocabulary* mpORBvocabulary;

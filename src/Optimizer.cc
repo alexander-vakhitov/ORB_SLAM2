@@ -28,11 +28,14 @@
 #include "Thirdparty/g2o/g2o/solvers/linear_solver_dense.h"
 #include "Thirdparty/g2o/g2o/types/types_seven_dof_expmap.h"
 
+#include "g2o_pose.h"
+
 #include<Eigen/StdVector>
 
 #include "Converter.h"
 
 #include<mutex>
+#include <opencv/cxeigen.hpp>
 
 namespace ORB_SLAM2
 {
@@ -234,7 +237,7 @@ void Optimizer::BundleAdjustment(const vector<KeyFrame *> &vpKFs, const vector<M
                     Ainv = A.inverse();
                 }
                 cv::Mat Ainv_cv = Converter::toCvMat(Ainv);
-                pMP->SetWorldCov(Ainv_cv);
+//                pMP->SetWorldCov(Ainv_cv);
             }
 
             pMP->UpdateNormalAndDepth();
@@ -249,8 +252,45 @@ void Optimizer::BundleAdjustment(const vector<KeyFrame *> &vpKFs, const vector<M
 
 }
 
-int Optimizer::PoseOptimization(Frame *pFrame)
+void jacobianPointProjectionMono(const cv::Mat& Xw, const cv::Mat& S3D, const cv::Mat& R, const cv::Mat& t,
+                                 double f, cv::Mat* Sres_p)
 {
+    cv::Mat Xc = R * Xw + t;
+    cv::Mat J = cv::Mat::zeros(2, 3, CV_32FC1);
+    J.at<float>(0,0) = f / Xc.at<float>(2);
+    J.at<float>(1,1) = f / Xc.at<float>(2);
+    J.at<float>(0,2) = -f * Xc.at<float>(0) / Xc.at<float>(2) / Xc.at<float>(2);
+    J.at<float>(1,2) = -f * Xc.at<float>(1) / Xc.at<float>(2) / Xc.at<float>(2);
+    *Sres_p = J * R * S3D * R.t() * J.t();
+}
+void jacobianPointProjectionStereo(const cv::Mat& Xw, const cv::Mat& S3D, const cv::Mat& R, const cv::Mat& t,
+                                   double f, double b, cv::Mat* Sres_p)
+{
+    cv::Mat Xc = R * Xw + t;
+    cv::Mat B = cv::Mat::zeros(3, 1, CV_32FC1);
+    B.at<float>(0, 0) = -b;
+    cv::Mat Xc_r = Xc + B;
+    cv::Mat J = cv::Mat::zeros(3, 3, CV_32FC1);
+    J.at<float>(0,0) = f / Xc.at<float>(2);
+    J.at<float>(1,1) = f / Xc.at<float>(2);
+    J.at<float>(2,0) = f / Xc.at<float>(2);
+    J.at<float>(0,2) = -f * Xc.at<float>(0) / Xc.at<float>(2) / Xc.at<float>(2);
+    J.at<float>(1,2) = -f * Xc.at<float>(1) / Xc.at<float>(2) / Xc.at<float>(2);
+    J.at<float>(2,2) = -f * Xc_r.at<float>(0) / Xc.at<float>(2) / Xc.at<float>(2);
+    *Sres_p = J * R * S3D * R.t() * J.t();
+}
+
+
+
+int Optimizer::PoseOptimization(Frame *pFrame, int covUseMode, double thrCoeff)
+{
+    if (covUseMode > 0)
+    {
+        return CovPoseOptimization(pFrame, covUseMode-1, thrCoeff);
+    }
+//    else {
+//        return CovPoseOptimization(pFrame, 0);
+//    }
     g2o::SparseOptimizer optimizer;
     g2o::BlockSolver_6_3::LinearSolverType * linearSolver;
 
@@ -286,6 +326,13 @@ int Optimizer::PoseOptimization(Frame *pFrame)
     const float deltaMono = sqrt(5.991);
     const float deltaStereo = sqrt(7.815);
 
+    cv::Mat R = pFrame->mTcw.colRange(0, 3).rowRange(0, 3);
+    cv::Mat t = pFrame->mTcw.col(3).rowRange(0, 3);
+
+//    Eigen::Matrix3d R_eig;
+//    cv::cv2eigen(R, R_eig);
+//    Eigen::Vector3d t_eig;
+//    cv::cv2eigen(t, t_eig);
 
     {
     unique_lock<mutex> lock(MapPoint::mGlobalMutex);
@@ -310,7 +357,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
                 e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(0)));
                 e->setMeasurement(obs);
                 const float invSigma2 = pFrame->mvInvLevelSigma2[kpUn.octave];
-                e->setInformation(Eigen::Matrix2d::Identity()*invSigma2);
+
 
                 g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
                 e->setRobustKernel(rk);
@@ -324,6 +371,9 @@ int Optimizer::PoseOptimization(Frame *pFrame)
                 e->Xw[0] = Xw.at<float>(0);
                 e->Xw[1] = Xw.at<float>(1);
                 e->Xw[2] = Xw.at<float>(2);
+
+                //original variant
+                e->setInformation(Eigen::Matrix2d::Identity()*invSigma2);
 
                 optimizer.addEdge(e);
 
@@ -346,8 +396,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
                 e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(0)));
                 e->setMeasurement(obs);
                 const float invSigma2 = pFrame->mvInvLevelSigma2[kpUn.octave];
-                Eigen::Matrix3d Info = Eigen::Matrix3d::Identity()*invSigma2;
-                e->setInformation(Info);
+
 
                 g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
                 e->setRobustKernel(rk);
@@ -362,6 +411,9 @@ int Optimizer::PoseOptimization(Frame *pFrame)
                 e->Xw[0] = Xw.at<float>(0);
                 e->Xw[1] = Xw.at<float>(1);
                 e->Xw[2] = Xw.at<float>(2);
+
+                Eigen::Matrix3d Info = Eigen::Matrix3d::Identity()*invSigma2;
+                e->setInformation(Info);
 
                 optimizer.addEdge(e);
 
@@ -390,6 +442,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
         vSE3->setEstimate(Converter::toSE3Quat(pFrame->mTcw));
         optimizer.initializeOptimization(0);
         optimizer.optimize(its[it]);
+
 
         nBad=0;
         for(size_t i=0, iend=vpEdgesMono.size(); i<iend; i++)
@@ -462,6 +515,380 @@ int Optimizer::PoseOptimization(Frame *pFrame)
 
     return nInitialCorrespondences-nBad;
 }
+
+
+
+int Optimizer::CovPoseOptimization(Frame *pFrame, int covUseMode, double thrCoeff, double SigmaProjThr)
+{
+
+//    std::cout << " using cov opt!!!" << covUseMode << " " << thrCoeff << std::endl;
+
+    cv::Mat fc = pFrame->GetCameraCenter();
+    Eigen::Vector3d fc_eig;
+    cv::cv2eigen(fc, fc_eig);
+
+    g2o::SparseOptimizer optimizer;
+    g2o::BlockSolver_6_3::LinearSolverType * linearSolver;
+
+    linearSolver = new g2o::LinearSolverDense<g2o::BlockSolver_6_3::PoseMatrixType>();
+
+    g2o::BlockSolver_6_3 * solver_ptr = new g2o::BlockSolver_6_3(linearSolver);
+
+    g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(solver_ptr);
+    optimizer.setAlgorithm(solver);
+
+    int nInitialCorrespondences=0;
+
+    // Set Frame vertex
+    g2o::VertexSE3Expmap * vSE3 = new g2o::VertexSE3Expmap();
+    vSE3->setEstimate(Converter::toSE3Quat(pFrame->mTcw));
+    vSE3->setId(0);
+    vSE3->setFixed(false);
+    optimizer.addVertex(vSE3);
+
+    // Set MapPoint vertices
+    const int N = pFrame->N;
+
+    vector<g2o::EdgeSE3CovProjectXYZOnlyPose*> vpEdgesMono;
+//    vector<g2o::EdgeSE3ProjectXYZOnlyPose*> vpEdgesMono;
+    vector<size_t> vnIndexEdgeMono;
+    vpEdgesMono.reserve(N);
+    vnIndexEdgeMono.reserve(N);
+
+    vector<g2o::EdgeStereoSE3CovProjectXYZOnlyPose*> vpEdgesStereo;
+//    vector<g2o::EdgeStereoSE3ProjectXYZOnlyPose*> vpEdgesStereo;
+    vector<size_t> vnIndexEdgeStereo;
+    vpEdgesStereo.reserve(N);
+    vnIndexEdgeStereo.reserve(N);
+
+    const float deltaMono = sqrt(5.991);
+    const float deltaStereo = sqrt(7.815);
+
+    cv::Mat R = pFrame->mTcw.colRange(0, 3).rowRange(0, 3);
+    cv::Mat t = pFrame->mTcw.col(3).rowRange(0, 3);
+    Eigen::Matrix2d F;
+    F.setZero();
+    F(0,0) = pFrame->fx * pFrame->fx;
+    F(1,1) = pFrame->fy * pFrame->fy;
+
+    Eigen::Matrix3d Fs;
+    Fs.setZero();
+    F(0,0) = pFrame->fx * pFrame->fx;
+    F(1,1) = pFrame->fy * pFrame->fy;
+    F(2,2) = pFrame->fx * pFrame->fx;
+
+
+    Eigen::Matrix3d R_eig;
+    cv::cv2eigen(R, R_eig);
+    Eigen::Vector3d t_eig;
+    cv::cv2eigen(t, t_eig);
+
+
+
+    {
+        unique_lock<mutex> lock(MapPoint::mGlobalMutex);
+
+        for(int i=0; i<N; i++)
+        {
+            MapPoint* pMP = pFrame->mvpMapPoints[i];
+            if(pMP)
+            {
+//                cv::Mat S3d = pMP->GetWorldCov(fc_eig);
+                cv::Mat S3d = pMP->GetWorldCovFull();
+                if (covUseMode == 1 && S3d.cols < 3)
+                {
+                    continue;
+                }
+
+                cv::Mat Xw = pMP->GetWorldPos();
+
+                Eigen::Matrix2d SigmaProj;
+                SigmaProj.setZero();
+
+                Eigen::Matrix3d S3d_eig;
+                cv::cv2eigen(S3d, S3d_eig);
+
+                Eigen::Vector3d Xw_eig;
+                cv::cv2eigen(Xw, Xw_eig);
+                Eigen::Vector3d Xc = R_eig * Xw_eig + t_eig;
+
+                if (covUseMode == 1) {
+                    Eigen::Matrix<double, 2, 3> J_proj;
+                    GetJProjOpt(Xc(0), Xc(1), Xc(2), &J_proj);
+                    SigmaProj = F * J_proj * R_eig * S3d_eig * R_eig.transpose() * J_proj.transpose();
+                }
+
+                bool is_point_2d = false;
+//            if (SigmaProj.trace() > 100 * SigmaDet.trace())
+                if (covUseMode == 1 && SigmaProj.trace() > SigmaProjThr)
+                {
+//                    is_point_2d = true;
+                    continue;
+                }
+
+
+                // Monocular observation
+                if(pFrame->mvuRight[i]<0)
+                {
+                    nInitialCorrespondences++;
+                    pFrame->mvbOutlier[i] = false;
+
+                    Eigen::Matrix<double,2,1> obs;
+                    const cv::KeyPoint &kpUn = pFrame->mvKeysUn[i];
+                    obs << kpUn.pt.x, kpUn.pt.y;
+
+                    g2o::EdgeSE3CovProjectXYZOnlyPose* e = new g2o::EdgeSE3CovProjectXYZOnlyPose();
+//                    g2o::EdgeSE3ProjectXYZOnlyPose* e = new g2o::EdgeSE3ProjectXYZOnlyPose();
+
+                    e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(0)));
+                    e->setMeasurement(obs);
+                    const float invSigma2 = pFrame->mvInvLevelSigma2[kpUn.octave];
+
+
+                    g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
+                    e->setRobustKernel(rk);
+                    rk->setDelta(deltaMono);
+
+                    e->fx = pFrame->fx;
+                    e->fy = pFrame->fy;
+                    e->cx = pFrame->cx;
+                    e->cy = pFrame->cy;
+
+                    Eigen::Matrix2d SigmaTot = 1.0 / invSigma2 * Eigen::Matrix2d::Identity();
+                    if (covUseMode == 1)
+                    {
+                        SigmaTot = SigmaTot + SigmaProj;
+                    }
+                    Eigen::Matrix2d U,S;
+                    g2o::eigen_safe(SigmaTot, &U, &S);
+                    Eigen::Vector2d svals = S.diagonal();
+                    Eigen::DiagonalMatrix<double, 2> Si;
+                    Si.diagonal() << 1.0 / sqrt(fabs(svals(0))), 1.0/sqrt(fabs(svals(1)));
+                    Eigen::Matrix2d Sigma2dInv_sqrt = U * Si * U.transpose();
+                    e->Sigma_est_sqin = Sigma2dInv_sqrt;
+                    e->use_sigma_est = true;
+
+                    e->sigma_d_2 = 1.0 / invSigma2;
+                    if (covUseMode == 1 && !is_point_2d) {
+                        e->sigma_p_2 = (S3d.at<float>(0, 0) + S3d.at<float>(1, 1) + S3d.at<float>(2, 2)) * 0.33333;// * invSigma2;
+                        e->Sigma_p_2 = S3d_eig;//(S3d_eig.trace() * 0.333) * Eigen::Matrix3d::Identity();// * invSigma2; //Eigen::Matrix3d::Identity() * e->sigma_p_2;//
+                    } else {
+                        e->sigma_p_2 = 0.0;
+                        e->Sigma_p_2.setZero();
+                    }
+//                    std::cout << "mono " << e->sigma_d_2 << " " << e->sigma_p_2 << std::endl;
+                    e->Xw[0] = Xw.at<float>(0);
+                    e->Xw[1] = Xw.at<float>(1);
+                    e->Xw[2] = Xw.at<float>(2);
+//                    if (covUseMode == 0)
+                    {
+                        Eigen::Matrix2d Info = Eigen::Matrix2d::Identity();// * invSigma2;
+                        e->setInformation(Info);
+                    }
+                    optimizer.addEdge(e);
+
+                    vpEdgesMono.push_back(e);
+                    vnIndexEdgeMono.push_back(i);
+                }
+                else  // Stereo observation
+                {
+                    nInitialCorrespondences++;
+                    pFrame->mvbOutlier[i] = false;
+
+                    //SET EDGE
+                    Eigen::Matrix<double,3,1> obs;
+                    const cv::KeyPoint &kpUn = pFrame->mvKeysUn[i];
+                    const float &kp_ur = pFrame->mvuRight[i];
+                    obs << kpUn.pt.x, kpUn.pt.y, kp_ur;
+
+                    g2o::EdgeStereoSE3CovProjectXYZOnlyPose* e = new g2o::EdgeStereoSE3CovProjectXYZOnlyPose();
+//                    g2o::EdgeStereoSE3ProjectXYZOnlyPose* e = new g2o::EdgeStereoSE3ProjectXYZOnlyPose();
+
+                    e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(0)));
+                    e->setMeasurement(obs);
+                    const float invSigma2 = pFrame->mvInvLevelSigma2[kpUn.octave];
+
+
+                    g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
+                    e->setRobustKernel(rk);
+                    rk->setDelta(deltaStereo);
+
+                    e->fx = pFrame->fx;
+                    e->fy = pFrame->fy;
+                    e->cx = pFrame->cx;
+                    e->cy = pFrame->cy;
+                    e->b = pFrame->mb;
+                    e->sigma_d_2 = 1.0 / invSigma2;
+
+                    Eigen::Matrix3d SigmaTot = 1.0 / invSigma2 * Eigen::Matrix3d::Identity();
+                    if (covUseMode == 1)
+                    {
+                        Eigen::Matrix3d J_proj;
+                        GetJProjOptStereo(Xc(0), Xc(1), Xc(2), pFrame->mb, &J_proj);
+                        Eigen::Matrix3d SigmaProjStereo = Fs * J_proj * R_eig * S3d_eig * R_eig.transpose() * J_proj.transpose();
+                        SigmaTot = SigmaTot + SigmaProjStereo;
+                    }
+                    Eigen::Matrix3d U,S;
+                    g2o::eigen_safe(SigmaTot, &U, &S);
+                    Eigen::Vector3d svals = S.diagonal();
+                    Eigen::DiagonalMatrix<double, 3> Si;
+                    Si.diagonal() << 1.0 / sqrt(fabs(svals(0))), 1.0/sqrt(fabs(svals(1))), 1.0/sqrt(fabs(svals(2)));
+                    Eigen::Matrix3d Sigma3dInv_sqrt = U * Si * U.transpose();
+                    e->Sigma_est_sqin = Sigma3dInv_sqrt;
+                    e->use_sigma_est = true;
+
+                    if (covUseMode == 1 && !is_point_2d) {
+//                        cv::Mat S3d = pMP->GetWorldCov();
+                        e->sigma_p_2 = (S3d.at<float>(0, 0) + S3d.at<float>(1, 1) + S3d.at<float>(2, 2)) * 0.33333;// * invSigma2;
+                        Eigen::Matrix3d S3d_eig;
+                        cv::cv2eigen(S3d, S3d_eig);
+                        e->Sigma_p_2 = S3d_eig;//(S3d_eig.trace() * 0.333) * Eigen::Matrix3d::Identity();//S3d_eig;// * invSigma2; //Eigen::Matrix3d::Identity() * e->sigma_p_2;//
+                    } else {
+                        e->sigma_p_2 = 0.0;
+                        e->Sigma_p_2.setZero();
+                    }
+                    cv::Mat Xw = pMP->GetWorldPos();
+                    e->Xw[0] = Xw.at<float>(0);
+                    e->Xw[1] = Xw.at<float>(1);
+                    e->Xw[2] = Xw.at<float>(2);
+
+//                    if (covUseMode == 0)
+                    {
+                        Eigen::Matrix3d Info = Eigen::Matrix3d::Identity();// * invSigma2;
+                        e->setInformation(Info);
+                    }
+                    optimizer.addEdge(e);
+
+                    vpEdgesStereo.push_back(e);
+                    vnIndexEdgeStereo.push_back(i);
+                }
+            }
+
+        }
+    }
+
+
+    if(nInitialCorrespondences<3)
+        return 0;
+
+    // We perform 4 optimizations, after each optimization we classify observation as inlier/outlier
+    // At the next optimization, outliers are not included, but at the end they can be classified as inliers again.
+
+    float chi2Mono[4]={5.991,5.991,5.991,5.991};
+    float chi2Stereo[4]={7.815,7.815,7.815, 7.815};
+
+    for (int i = 0; i < 4; i++)
+    {
+        chi2Mono[i] = thrCoeff * chi2Mono[i];
+        chi2Stereo[i] = thrCoeff * chi2Stereo[i];
+    }
+
+    const int its[4]={10,10,10,10};
+
+    int nBad=0;
+    for(size_t it=0; it<4; it++)
+    {
+
+        vSE3->setEstimate(Converter::toSE3Quat(pFrame->mTcw));
+
+        for (size_t si = 0; si < vpEdgesStereo.size(); si++)
+        {
+            vpEdgesStereo[si]->use_sigma_est = false;
+        }
+        for (size_t si = 0; si < vpEdgesMono.size(); si++)
+        {
+            vpEdgesMono[si]->use_sigma_est = false;
+        }
+
+        optimizer.initializeOptimization(0);
+        optimizer.optimize(its[it]);
+
+//        optimizer.optimize(its[it]/2);
+//
+//        for (size_t si = 0; si < vpEdgesStereo.size(); si++)
+//        {
+//            vpEdgesStereo[si]->use_sigma_est = false;
+//        }
+//        for (size_t si = 0; si < vpEdgesMono.size(); si++)
+//        {
+//            vpEdgesMono[si]->use_sigma_est = false;
+//        }
+//
+//        optimizer.optimize(its[it]/2);
+
+        nBad=0;
+        for(size_t i=0, iend=vpEdgesMono.size(); i<iend; i++)
+        {
+            g2o::EdgeSE3CovProjectXYZOnlyPose* e = vpEdgesMono[i];
+//            g2o::EdgeSE3ProjectXYZOnlyPose* e = vpEdgesMono[i];
+
+            const size_t idx = vnIndexEdgeMono[i];
+
+            if(pFrame->mvbOutlier[idx])
+            {
+                e->computeError();
+            }
+
+            const float chi2 = e->chi2();
+
+            if(chi2>chi2Mono[it])
+            {
+                pFrame->mvbOutlier[idx]=true;
+                e->setLevel(1);
+                nBad++;
+            }
+            else
+            {
+                pFrame->mvbOutlier[idx]=false;
+                e->setLevel(0);
+            }
+
+            if(it==2)
+                e->setRobustKernel(0);
+        }
+
+        for(size_t i=0, iend=vpEdgesStereo.size(); i<iend; i++)
+        {
+            g2o::EdgeStereoSE3CovProjectXYZOnlyPose* e = vpEdgesStereo[i];
+
+            const size_t idx = vnIndexEdgeStereo[i];
+
+            if(pFrame->mvbOutlier[idx])
+            {
+                e->computeError();
+            }
+
+            const float chi2 = e->chi2();
+
+            if(chi2>chi2Stereo[it])
+            {
+                pFrame->mvbOutlier[idx]=true;
+                e->setLevel(1);
+                nBad++;
+            }
+            else
+            {
+                e->setLevel(0);
+                pFrame->mvbOutlier[idx]=false;
+            }
+
+            if(it==2)
+                e->setRobustKernel(0);
+        }
+
+        if(optimizer.edges().size()<10)
+            break;
+    }
+
+    // Recover optimized pose and return number of inliers
+    g2o::VertexSE3Expmap* vSE3_recov = static_cast<g2o::VertexSE3Expmap*>(optimizer.vertex(0));
+    g2o::SE3Quat SE3quat_recov = vSE3_recov->estimate();
+    cv::Mat pose = Converter::toCvMat(SE3quat_recov);
+    pFrame->SetPose(pose);
+
+    return nInitialCorrespondences-nBad;
+}
+
 
 void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap)
 {    
@@ -789,14 +1216,18 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
 
         if (vPoint->hessianData())
         {
+//            std::cout << " hessian data available " << std::endl;
             const Eigen::Matrix3d A = vPoint->A();
             Eigen::Matrix3d Ainv = Eigen::Matrix3d::Zero();
-            if (fabs(A.determinant())>1e-6)
+//            if (fabs(A.determinant())>1e-6)
             {
                 Ainv = A.inverse();
             }
             cv::Mat Ainv_cv = Converter::toCvMat(Ainv);
-            pMP->SetWorldCov(Ainv_cv);
+//            pMP->SetWorldCov(Ainv_cv);
+        } else {
+//            std::cout << " no hessian data" << std::endl;
+//            pMP->SetWorldCov(cv::Mat());
         }
         pMP->UpdateNormalAndDepth();
     }
@@ -1267,3 +1698,4 @@ int Optimizer::OptimizeSim3(KeyFrame *pKF1, KeyFrame *pKF2, vector<MapPoint *> &
 
 
 } //namespace ORB_SLAM
+

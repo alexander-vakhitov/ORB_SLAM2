@@ -82,6 +82,8 @@ public:
     // This resumes local mapping thread and performs SLAM again.
     void DeactivateLocalizationMode();
 
+    void ChangePnpMode(int newMode, bool isPoseOpt, bool isCovOpt, bool isURansac, double coeff = 1.0);
+
     // Returns true if there have been a big map change (loop closure, global BA)
     // since last call to this function
     bool MapChanged();
@@ -110,7 +112,7 @@ public:
     // Only for stereo and RGB-D. This method does not work for monocular.
     // Call first Shutdown()
     // See format details at: http://www.cvlibs.net/datasets/kitti/eval_odometry.php
-    void SaveTrajectoryKITTI(const string &filename);
+    cv::Mat SaveTrajectoryKITTI(const string &filename);
 
     // TODO: Save/Load functions
     // SaveMap(const string &filename);
@@ -121,6 +123,8 @@ public:
     int GetTrackingState();
     std::vector<MapPoint*> GetTrackedMapPoints();
     std::vector<cv::KeyPoint> GetTrackedKeyPointsUn();
+
+    void GetLocalizationDetails(int* inlierCount, int* frameId);
 
 private:
 
@@ -168,6 +172,11 @@ private:
     std::mutex mMutexMode;
     bool mbActivateLocalizationMode;
     bool mbDeactivateLocalizationMode;
+
+    bool mbChangePnpMode = false;
+    int mNewPnpMode;
+    bool mNewIsPoseOpt, mIsCovOpt, mIsURansac;
+    double mdPnPCoeff;
 
     // Tracking state
     int mTrackingState;

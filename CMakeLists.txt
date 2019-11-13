@@ -9,8 +9,8 @@ ENDIF()
 
 MESSAGE("Build type: " ${CMAKE_BUILD_TYPE})
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}  -Wall  -O3 -march=native -Wno-deprecated-declarations")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall   -O3 -march=native -Wno-deprecated-declarations")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}  -Wall  -Og -march=native -Wno-deprecated-declarations")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall   -Og -march=native -Wno-deprecated-declarations")
 
 # Check C++11 or C++0x support
 include(CheckCXXCompilerFlag)
@@ -81,6 +81,7 @@ src/pnp3d.cpp
 src/gradient.cpp
 src/hessian.cpp
 src/solver_hesch.cpp
+src/g2o_pose.cpp
 src/vgl.cc)
 
 target_link_libraries(${PROJECT_NAME}
@@ -115,6 +116,10 @@ target_link_libraries(stereo_kitti_half ${PROJECT_NAME})
 add_executable(stereo_euroc
 Examples/Stereo/stereo_euroc.cc)
 target_link_libraries(stereo_euroc ${PROJECT_NAME})
+
+add_executable(stereo_euroc_half
+        Examples/Stereo/stereo_euroc_half.cc)
+target_link_libraries(stereo_euroc_half ${PROJECT_NAME})
 
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/Examples/Monocular)

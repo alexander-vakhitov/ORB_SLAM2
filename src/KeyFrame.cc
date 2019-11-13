@@ -17,6 +17,8 @@
 * You should have received a copy of the GNU General Public License
 * along with ORB-SLAM2. If not, see <http://www.gnu.org/licenses/>.
 */
+#include <Eigen/Dense>
+#include <opencv/cxeigen.hpp>
 
 #include "KeyFrame.h"
 #include "Converter.h"
@@ -613,6 +615,25 @@ bool KeyFrame::IsInImage(const float &x, const float &y) const
     return (x>=mnMinX && x<mnMaxX && y>=mnMinY && y<mnMaxY);
 }
 
+cv::Mat KeyFrame::UnprojectCov(const int &i)
+{
+    const float z = mvDepth[i];
+    const float x = mvKeys[i].pt.x;
+    const float y = mvKeys[i].pt.y;
+    if(z > 0 && fabs(mvKeys[i].pt.x - cx) > 0)
+    {
+        float sigma_x_2 = 1.0 / mvInvLevelSigma2[mvKeys[i].octave];
+        cv::Mat s3D = Frame::UnprojectPointCovFromParams(z, x, y, sigma_x_2, cx, cy, mb, fx,
+                Twc.colRange(0, 3).rowRange(0, 3));
+//        std::cout << " KEYFRAME s3D for point " << i << std::endl;
+//        std::cout << s3D << std::endl;
+        return s3D;
+    }
+    else
+        return cv::Mat();
+}
+
+
 cv::Mat KeyFrame::UnprojectStereo(int i)
 {
     const float z = mvDepth[i];
@@ -661,6 +682,51 @@ float KeyFrame::ComputeSceneMedianDepth(const int q)
     sort(vDepths.begin(),vDepths.end());
 
     return vDepths[(vDepths.size()-1)/q];
+}
+
+cv::Mat KeyFrame::UnprojectPointCovFromParams(int id, const cv::Mat& X_cv)
+{
+    Eigen::Vector3d X_eig;
+    cv::cv2eigen(X_cv, X_eig);
+    Eigen::Matrix4d Tcw_eig;
+    cv::cv2eigen(GetPose(), Tcw_eig);
+    Eigen::Vector3d Xc = Tcw_eig.block<3,3>(0, 0) * X_eig + Tcw_eig.block<3,1>(0, 3);
+    double sigma_2d = mvLevelSigma2[mvKeys[id].octave];
+    return UnprojectPointCovFromParams(Xc(2), Xc(0), Xc(1), sigma_2d, cx, cy, mb, fx, GetPoseInverse().colRange(0, 3).rowRange(0, 3));
+}
+
+cv::Mat KeyFrame::UnprojectPointCovFromParams(float z, float x, float y, float sigma_x_2,
+                                           float cx, float cy, float b, float f, const cv::Mat& Rwc)
+{
+
+//    Eigen::Matrix3d J;
+//    J.setZero();
+//    J(0, 0) = 1.0 / z;
+//    J(0, 2) = - x / z / z;
+//    J(1, 1) = 1.0 / z;
+//    J(1, 2) = - y / z / z;
+//    J(2, 0) = 1.0 / z;
+//    J(2, 2) = - (x-b) / z / z;
+//    Eigen::Matrix3d JJ = J.transpose() * J;
+//    Eigen::Matrix3d S3d_eig = JJ.inverse()*J.transpose()*Eigen::Matrix3d::Identity()*sigma_x_2/f/f*J*JJ.inverse();
+
+    Eigen::Matrix<double, 4, 3> J;
+    J.setZero();
+    J(0,0) = 1.0/z;
+    J(0,2) = -x/z/z;
+    J(1,1) = 1.0/z;
+    J(1,2) = -y/z/z;
+    J(2,0) = 1.0/z;
+    J(2,2) = -(x-b)/z/z;
+    J(3,1) = 1.0/z;
+    J(3,2) = -y/z/z;
+
+    Eigen::Matrix3d JJi = (J.transpose() * J).inverse();
+    Eigen::Matrix3d S3d_eig = JJi * sigma_x_2/f/f;
+
+    cv::Mat s3D = Converter::toCvMat(S3d_eig);
+    return Rwc * s3D * Rwc.t();
+//    return cv::Mat();
 }
 
 } //namespace ORB_SLAM

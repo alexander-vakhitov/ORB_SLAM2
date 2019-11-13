@@ -433,7 +433,8 @@ void LocalMapping::CreateNewMapPoints()
 
             // Triangulation is succesfull
             MapPoint* pMP = new MapPoint(x3D,mpCurrentKeyFrame,mpMap);
-
+            cv::Mat s3D = mpCurrentKeyFrame->UnprojectCov(idx1);
+//            pMP->SetWorldCov(s3D);
             pMP->AddObservation(mpCurrentKeyFrame,idx1);            
             pMP->AddObservation(pKF2,idx2);
 

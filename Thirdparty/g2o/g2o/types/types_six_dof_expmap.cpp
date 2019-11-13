@@ -295,6 +295,13 @@ Vector2d EdgeSE3ProjectXYZOnlyPose::cam_project(const Vector3d & trans_xyz) cons
   return res;
 }
 
+Vector2d EdgeSE3CovProjectXYZOnlyPose::cam_project(const Vector3d & trans_xyz) const{
+  Vector2d proj = project2d(trans_xyz);
+  Vector2d res;
+  res[0] = proj[0]*fx + cx;
+  res[1] = proj[1]*fy + cy;
+  return res;
+}
 
 Vector3d EdgeStereoSE3ProjectXYZOnlyPose::cam_project(const Vector3d & trans_xyz) const{
   const float invz = 1.0f/trans_xyz[2];
@@ -302,6 +309,15 @@ Vector3d EdgeStereoSE3ProjectXYZOnlyPose::cam_project(const Vector3d & trans_xyz
   res[0] = trans_xyz[0]*invz*fx + cx;
   res[1] = trans_xyz[1]*invz*fy + cy;
   res[2] = res[0] - bf*invz;
+  return res;
+}
+
+Vector3d EdgeStereoSE3CovProjectXYZOnlyPose::cam_project(const Vector3d & trans_xyz) const{
+  const float invz = 1.0f/trans_xyz[2];
+  Vector3d res;
+  res[0] = trans_xyz[0]*invz*fx + cx;
+  res[1] = trans_xyz[1]*invz*fy + cy;
+  res[2] = res[0] - b*invz*fx;
   return res;
 }
 
@@ -320,6 +336,58 @@ bool EdgeStereoSE3ProjectXYZOnlyPose::read(std::istream& is){
 }
 
 bool EdgeStereoSE3ProjectXYZOnlyPose::write(std::ostream& os) const {
+
+  for (int i=0; i<=3; i++){
+    os << measurement()[i] << " ";
+  }
+
+  for (int i=0; i<=2; i++)
+    for (int j=i; j<=2; j++){
+      os << " " <<  information()(i,j);
+    }
+  return os.good();
+}
+
+bool EdgeStereoSE3CovProjectXYZOnlyPose::read(std::istream& is){
+    for (int i=0; i<=3; i++){
+        is >> _measurement[i];
+    }
+    for (int i=0; i<=2; i++)
+        for (int j=i; j<=2; j++) {
+            is >> information()(i,j);
+            if (i!=j)
+                information()(j,i)=information()(i,j);
+        }
+    return true;
+}
+
+bool EdgeStereoSE3CovProjectXYZOnlyPose::write(std::ostream& os) const {
+
+    for (int i=0; i<=3; i++){
+        os << measurement()[i] << " ";
+    }
+
+    for (int i=0; i<=2; i++)
+        for (int j=i; j<=2; j++){
+            os << " " <<  information()(i,j);
+        }
+    return os.good();
+}
+
+bool EdgeSE3CovProjectXYZOnlyPose::read(std::istream& is){
+  for (int i=0; i<=3; i++){
+    is >> _measurement[i];
+  }
+  for (int i=0; i<=2; i++)
+    for (int j=i; j<=2; j++) {
+      is >> information()(i,j);
+      if (i!=j)
+        information()(j,i)=information()(i,j);
+    }
+  return true;
+}
+
+bool EdgeSE3CovProjectXYZOnlyPose::write(std::ostream& os) const {
 
   for (int i=0; i<=3; i++){
     os << measurement()[i] << " ";

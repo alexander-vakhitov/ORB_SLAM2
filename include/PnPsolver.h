@@ -70,7 +70,9 @@ namespace ORB_SLAM2 {
                   double fu, double fv, double uc, double vc, int nMapPoints,
                   const std::vector<float>& sigmas_3d = std::vector<float>(),
                   const std::vector<Eigen::Matrix3d>& sigmas_3d_full = std::vector<Eigen::Matrix3d>(),
-                  int mode = 0);
+                  int mode = 0, bool is_u_ransac = true, double thrCoeff=1.0, bool is_debug_mode = false,
+                  const std::string& debug_path = "", const std::string& debug_pose_path = "",
+                  const std::string& full_debug_path = "");
 
         ~PnPsolver();
 
@@ -82,7 +84,7 @@ namespace ORB_SLAM2 {
 
         cv::Mat iterate(int nIterations, bool &bNoMore, vector<bool> &vbInliers, int &nInliers);
 
-        cv::Mat FinalRefinement(const cv::Mat& T_init, const std::vector<bool>& inliersInit);
+        cv::Mat FinalRefinement(const cv::Mat& T_init, std::vector<bool>& inliersInit, int &nInliers);
 
         void SwitchMode(int new_mode);
 
@@ -91,14 +93,13 @@ namespace ORB_SLAM2 {
                       const vec2d& line_endpts_2d_start,
                       const vec2d& line_endpts_2d_end,
                       const mat6dvector& linesSigmas3D,
+                      const mat6dvector& linesSigmas3DFull,
                       const std::vector<Eigen::Matrix3d>& linesSigmasProj,
                       const std::vector<Eigen::Matrix3d>& linesSigmasProjNorm,
                       const std::vector<float>& linesDetSigmas2);
 
 
         bool GetLineInliers(vector<bool> &vbLineInliers, int &nLineInliers);
-
-
 
     private:
 
@@ -125,6 +126,7 @@ namespace ORB_SLAM2 {
 
         void add_line_correspondence(const Eigen::Matrix3d& S2d, const Eigen::Matrix3d& S2dN,
                                                 const Eigen::Matrix<double,6,6>& S6D,
+                                                const Eigen::Matrix<double,6,6>& S6DFull,
                                                 const Eigen::Vector3d& X_start, const Eigen::Vector3d& X_end,
                                                 const Eigen::Vector3d& lineEq, const Eigen::Vector3d& lineEqN,
                                                 const Eigen::Vector2d& xs, const Eigen::Vector2d& xe, float detSigma2,
@@ -143,9 +145,12 @@ namespace ORB_SLAM2 {
 
         double compute_pose_uncertain_accurate(const cv::Mat& T_est_cv, double R[3][3], double t[3]);
 
-        void compute_pose_dlsu(const cv::Mat& T_est_cv, double R[3][3], double t[3], bool is_two_stage=false);
+        void compute_pose_dlsu(const cv::Mat& T_est_cv, double R[3][3], double t[3], bool is_two_stage=false,
+                bool is_unc = true);
 
         void compute_pose_dlsu_accurate(const cv::Mat& T_est_cv, double R[3][3], double t[3]);
+
+        void compute_pose_ml_pnp(const cv::Mat& T_est_cv, double R[3][3], double t[3]);
 
         void relative_error(double &rot_err, double &transl_err,
                             const double Rtrue[3][3], const double ttrue[3],
@@ -233,6 +238,11 @@ namespace ORB_SLAM2 {
 
         void mat_to_quat(const double R[3][3], double q[4]);
 
+        void open_log();
+
+        void finish_log();
+
+        void output_initial_pose();
 
         double uc, vc, fu, fv;
 
@@ -243,10 +253,11 @@ namespace ORB_SLAM2 {
         std::vector<float> sigmas2d_selected;
         std::vector<float> sigmas3d_selected;
         std::vector<Eigen::Matrix3d> Sigmas3D_selected;
+        mat2dvector sigmas2D_selected;
         std::vector<float> sigmasDetLineSelected;
 
         std::vector<Eigen::Matrix3d> Sigmas2dlines_selected, Sigmas2dlinesN_selected;
-        mat6dvector Sigmas3dlines_selected;
+        mat6dvector Sigmas3dlines_selected, Sigmas3dlines_full_selected;
         std::vector<Eigen::Vector3d> Xs_selected, Xe_selected, lineEqs_selected, lineEqsN_selected;
         vec2d start_pts_2d_selected, end_pts_2d_selected;
         std::vector<Eigen::Matrix3d> Sigmas_LD_selected;
@@ -325,20 +336,34 @@ namespace ORB_SLAM2 {
 
         int mode;
 
-        bool bUseLines;
+        bool bUseLines = false;
 
         std::vector<Eigen::Vector3d> mvStartPts, mvEndPts, mvLineX0s, mvLineDirs;
         vec2d mvLineEndpts2dStart,mvLineEndpts2dEnd;
         std::vector<Eigen::Vector3d> mvLineEqs, mvLineEqsNorm;
-        mat6dvector mvSigmasLines3D;
+        mat6dvector mvSigmasLines3D, mvSigmasLines3DFull;
         std::vector<Eigen::Matrix3d> mvSigmasLines2D, mvSigmasLines2DNorm;
         std::vector<float> mvMaxLineError;
+        std::vector<float> mvSigmasDetLines;
 
         float mTh2;
 
         Eigen::Matrix3d K;
+
+        bool is_u_ransac;
+
+        double thrCoeff;
+
+        bool is_debug_mode;
+
+        std::string debug_path, debug_pose_path;
+
+        std::ofstream debug_output;
+
+        bool is_debug_opened;
     };
 
 } //namespace ORB_SLAM
 
 #endif //PNPSOLVER_H
+

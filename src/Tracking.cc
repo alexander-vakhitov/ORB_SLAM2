@@ -46,6 +46,7 @@
 #include <opencv/cxeigen.hpp>
 #include <include/SEGOLoop.h>
 
+#include "g2o_pose.h"
 
 #include "Sleep.h"
 
@@ -283,79 +284,21 @@ cv::Mat Tracking::GrabImageMonocular(const cv::Mat &im, const double &timestamp)
     return mCurrentFrame.mTcw.clone();
 }
 
-PnPUsolver2* Tracking::SetupPnPU(const Frame &F, const vector<MapPoint*> &vpMapPointMatches)
-{
-    std::vector<Eigen::Matrix3d> sigmas3d;
-    std::vector<cv::Point2f> p2D;
-    std::vector<float> sigma2;
-
-    std::vector<cv::Point3f> p3D;
-    std::vector<size_t> keyPointIndices;
-    std::vector<size_t> allIndices;
-
-    int idx=0;
-    for(size_t i=0, iend=vpMapPointMatches.size(); i<iend; i++)
-    {
-        MapPoint* pMP = vpMapPointMatches[i];
-
-        if(pMP)
-        {
-            if(!pMP->isBad())
-            {
-
-                cv::Mat S3d = pMP->GetWorldCov();
-
-//                    std::cout << " obtained sigma3d " << std::endl;
-                if (S3d.cols == 0)
-                {
-                    continue;
-//                    S3d = cv::Mat::zeros(3, 3, CV_32F);
-                }
-                Eigen::Matrix3d Sigma3d_eig;
-                cv::cv2eigen(S3d, Sigma3d_eig);
-                if (Sigma3d_eig.determinant() == 0)
-                {
-                    continue;
-                }
-
-                sigmas3d.push_back(Sigma3d_eig);
-
-                const cv::KeyPoint &kp = F.mvKeysUn[i];
-
-                p2D.push_back(kp.pt);
-                sigma2.push_back(F.mvLevelSigma2[kp.octave]);
-
-                cv::Mat Pos = pMP->GetWorldPos();
-                p3D.push_back(cv::Point3f(Pos.at<float>(0),Pos.at<float>(1), Pos.at<float>(2)));
-
-                keyPointIndices.push_back(i);
-                allIndices.push_back(idx);
-
-                idx++;
-            }
-        }
-    }
-
-    // Set camera calibration parameters
-    double fu = F.fx;
-    double fv = F.fy;
-    double uc = F.cx;
-    double vc = F.cy;
-
-    int n_map_points = vpMapPointMatches.size();
-
-//    PnPUsolver2(const std::vector<Eigen::Matrix3d>& sigmas3d, const std::vector<cv::Point2f>& p2D,
-//    const std::vector<float>& sigma2, const std::vector<cv::Point3f>& p3D,
-//    const std::vector<size_t>& keyPointIndices, const std::vector<size_t>& allIndices,
-//    double fu, double fv, double uc, double vc);
-    PnPUsolver2* pnpUSolver = new PnPUsolver2(sigmas3d, p2D, sigma2, p3D, keyPointIndices, allIndices, fu, fv, uc, vc,
-            n_map_points);
-    return pnpUSolver;
-}
-
-PnPsolver* Tracking::SetupPnP(const Frame &F, const vector<MapPoint*> &vpMapPointMatches)
+PnPsolver* Tracking::SetupPnP(const Frame &F, const vector<MapPoint*> &vpMapPointMatches, KeyFrame& kf)
 {
     int mode = mnPnpMode;
+
+    cv::Mat Tcw = kf.GetPose();
+
+    cv::Mat kfc = kf.GetCameraCenter();
+    Eigen::Vector3d kfc_eig;
+    cv::cv2eigen(kfc, kfc_eig);
+
+    Eigen::Matrix4d Tcw_eig;
+    cv::cv2eigen(Tcw, Tcw_eig);
+    Eigen::Matrix3d Rwc_eig = Tcw_eig.block<3,3>(0,0).transpose();
+
+    cv::Mat Rwc_cv = Converter::toCvMat(Rwc_eig);
 
     std::vector<float> sigmas_3d;
     std::vector<Eigen::Matrix3d> sigmas_3d_full;
@@ -366,6 +309,10 @@ PnPsolver* Tracking::SetupPnP(const Frame &F, const vector<MapPoint*> &vpMapPoin
     std::vector<size_t> keyPointIndices;
     std::vector<size_t> allIndices;
 
+
+    int good_mappoints = 0;
+    int mappoints_with_cov = 0;
+
     int idx=0;
     for(size_t i=0, iend=vpMapPointMatches.size(); i<iend; i++)
     {
@@ -376,20 +323,51 @@ PnPsolver* Tracking::SetupPnP(const Frame &F, const vector<MapPoint*> &vpMapPoin
             if(!pMP->isBad())
             {
 
-                cv::Mat S3d = pMP->GetWorldCov();
+                good_mappoints++;
 
-//                    std::cout << " obtained sigma3d " << std::endl;
+//                cv::Mat S3d = pMP->GetWorldCov(kfc_eig);
+                cv::Mat S3d = pMP->GetWorldCovFull();
+//                S3d = cv::Mat::zeros(3, 3, CV_32F);
+//                std::cout << "point cov " << std::endl;
+//                std::cout << S3d << std::endl;
                 if (S3d.empty())
                 {
                     continue;
-//                    S3d = cv::Mat::zeros(3, 3, CV_32F);
                 }
                 Eigen::Matrix3d Sigma3d_eig;
                 cv::cv2eigen(S3d, Sigma3d_eig);
-                if (Sigma3d_eig.determinant() == 0)
-                {
-                    continue;
-                }
+//                if (Sigma3d_eig.determinant() == 0)
+//                {
+//                    continue;
+//                }
+
+                //way 2
+//                cv::Mat X_cv = pMP->GetWorldPos();
+//                Eigen::Vector3d X_eig;
+//                cv::cv2eigen(X_cv, X_eig);
+//                Eigen::Vector3d Xc = Tcw_eig.block<3,3>(0, 0) * X_eig + Tcw_eig.block<3,1>(0, 3);
+////
+//////                cv::Mat UnprojectPointCovFromParams(float z, float x, float y, float sigma_x_2,
+//////                                                    float cx, float cy, float b, float f, const cv::Mat& Rwc);
+//                int id = pMP->GetIndexInKeyFrame(&kf);
+//                if (id < 0)
+//                {
+//                    pMP->SetWorldCov(cv::Mat());
+//                    continue;
+//                }
+//                if (kf.mvDepth[id]<0)
+//                {
+//                    pMP->SetWorldCov(cv::Mat());
+//                    continue;
+//                }
+//                double sigma_2d = kf.mvLevelSigma2[kf.mvKeys[id].octave];
+//                cv::Mat Sigma_3d = kf.UnprojectPointCovFromParams(Xc(2), Xc(0), Xc(1), sigma_2d, kf.cx, kf.cy, kf.mb, kf.fx, Rwc_cv);
+//                Eigen::Matrix3d Sigma3d_eig;
+//                cv::cv2eigen(Sigma_3d, Sigma3d_eig);
+                mappoints_with_cov++;
+
+//                pMP->SetWorldCov(Sigma_3d);
+
 
                 sigmas_3d_full.push_back(Sigma3d_eig);
                 sigmas_3d.push_back(Sigma3d_eig.trace()*0.33333);
@@ -410,6 +388,8 @@ PnPsolver* Tracking::SetupPnP(const Frame &F, const vector<MapPoint*> &vpMapPoin
         }
     }
 
+    std::cout << " map3d stats " << float(mappoints_with_cov) / float(good_mappoints) << std::endl;
+
     // Set camera calibration parameters
     double fu = F.fx;
     double fv = F.fy;
@@ -417,6 +397,7 @@ PnPsolver* Tracking::SetupPnP(const Frame &F, const vector<MapPoint*> &vpMapPoin
     double vc = F.cy;
 
     int n_map_points = vpMapPointMatches.size();
+//    int n_map_points = p3D.size();
 
 //    PnPsolver::PnPsolver(const std::vector<cv::Point2f> &p2D,
 //    const std::vector<float> &sigma2, const std::vector<cv::Point3f> &p3D,
@@ -429,7 +410,31 @@ PnPsolver* Tracking::SetupPnP(const Frame &F, const vector<MapPoint*> &vpMapPoin
                                               n_map_points,
                                               sigmas_3d,
                                               sigmas_3d_full,
-                                              mode);
+                                              mode,
+                                              mbIsURansac, mdPnPCoeff);
+
+//    std::string saveFolder = "/home/alexander/materials/pnp3d/debug_orbslam/";
+//    int r = rand();
+//    std::ofstream debugLogFile(saveFolder + std::to_string(F.mnId) + "_" + std::to_string(r)+".txt");
+//    for (size_t i = 0; i < p2D.size(); i++)
+//    {
+//        debugLogFile << p2D[i].x << "; " << p2D[i].y << "; ";
+//        debugLogFile << p3D[i].x << "; " << p3D[i].y << "; " << p3D[i].z << "; ";
+//        debugLogFile << keyPointIndices[i] << "; ";
+//        debugLogFile << allIndices[i] << "; ";
+//        debugLogFile << fu << "; " << fv << "; " << uc << "; " << vc << "; " << n_map_points << "; ";
+//        debugLogFile << sigmas_3d[i] << "; ";
+//        for (int j = 0; j < 3; j++)
+//        {
+//            for (int k = 0; k < 3; k++)
+//            {
+//                debugLogFile << sigmas_3d_full[i](j,k) << "; ";
+//            }
+//        }
+//        debugLogFile << mode << ";";
+//        debugLogFile << std::endl;
+//    }
+
     return pnpSolver;
 }
 
@@ -461,7 +466,7 @@ void Tracking::Track()
     else
     {
         // System is initialized. Track Frame.
-        bool bOK;
+        bool bOK = true;
 
         // Initial camera pose estimation using motion model or relocalization (if tracking is lost)
         if(!mbOnlyTracking)
@@ -474,21 +479,28 @@ void Tracking::Track()
                 // Local Mapping might have changed some MapPoints tracked in last frame
                 CheckReplacedInLastFrame();
 
-                if(mVelocity.empty() || mCurrentFrame.mnId<mnLastRelocFrameId+2)
-                {
+//                    std::cout << " sego used " << bOK << std::endl;
+                if (mVelocity.empty() || mCurrentFrame.mnId < mnLastRelocFrameId + 2) {
                     bOK = TrackReferenceKeyFrame();
-                }
-                else
-                {
-                    bOK = TrackWithMotionModel();
-                    if(!bOK) {
-                        bOK = TrackReferenceSego();
+                } else {
+                        bOK = TrackWithMotionModel();
+//                    bOK = false;
+                    if (!bOK) {
+//                        bOK = TrackReferenceSego();
+                        if (!bOK)
+                        {
+                            bOK = TrackReferenceKeyFrame();
+                            mCurrentFrame.mTcw = cv::Mat();
+                            mState = LOST;
+                            return;
+                        }
                     }
                 }
             }
             else
             {
                 bOK = Relocalization();
+
                 if (!bOK && bSegoRecovery)
                 {
                     bOK = TrackReferenceSego();
@@ -499,10 +511,12 @@ void Tracking::Track()
         else
         {
             // Localization Mode: Local Mapping is deactivated
-
+            mState = LOST;
             if(mState==LOST)
             {
                 bOK = Relocalization();
+
+                return;
             }
             else
             {
@@ -603,7 +617,7 @@ void Tracking::Track()
         mpFrameDrawer->Update(this);
 
         // If tracking were good, check if we insert a keyframe
-        if(bOK)
+        if(bOK && !mbOnlyTracking)
         {
             // Update motion model
             if(!mLastFrame.mTcw.empty())
@@ -658,9 +672,9 @@ void Tracking::Track()
         {
             if(mpMap->KeyFramesInMap()<=5)
             {
-                cout << "Track lost soon after initialisation, reseting..." << endl;
-                mpSystem->Reset();
-                return;
+//                cout << "Track lost soon after initialisation, reseting..." << endl;
+//                mpSystem->Reset();
+//                return;
             }
         }
 
@@ -711,13 +725,14 @@ void Tracking::StereoInitialization()
             if(z>0)
             {
                 cv::Mat x3D = mCurrentFrame.UnprojectStereo(i);
+                cv::Mat S3D = mCurrentFrame.UnprojectCov(i);
                 MapPoint* pNewMP = new MapPoint(x3D,pKFini,mpMap);
+//                pNewMP->SetWorldCov(S3D);
                 pNewMP->AddObservation(pKFini,i);
                 pKFini->AddMapPoint(pNewMP,i);
                 pNewMP->ComputeDistinctiveDescriptors();
                 pNewMP->UpdateNormalAndDepth();
                 mpMap->AddMapPoint(pNewMP);
-
                 mCurrentFrame.mvpMapPoints[i]=pNewMP;
             }
         }
@@ -941,6 +956,7 @@ void Tracking::CheckReplacedInLastFrame()
 
 bool Tracking::TrackReferenceKeyFrame()
 {
+    std::cout << " track ref " << std::endl;
     // Compute Bag of Words vector
     mCurrentFrame.ComputeBoW();
 
@@ -1050,7 +1066,10 @@ void Tracking::UpdateLastFrame()
 }
 
     void TriangulateLRPoints(const std::vector<std::vector<cv::KeyPoint>>& pt_trips, const Eigen::Vector3d& t12, const Eigen::Matrix3d& K,
-                             double pix_thr, std::vector<Eigen::Vector3d>* pts3d_p, std::vector<std::vector<cv::KeyPoint>>* pt_trips_fin_p, std::vector<int>* wrong_lr_p)
+                             const std::vector<float>& sigmaLevels2,
+                             double pix_thr, std::vector<Eigen::Vector3d>* pts3d_p, std::vector<std::vector<cv::KeyPoint>>* pt_trips_fin_p,
+                             std::vector<int>* wrong_lr_p, std::vector<float>* sigma2, std::vector<float>* sigma3,
+                             std::vector<Eigen::Matrix3d>* sigma3full)
     {
         cv::Mat P0 = cv::Mat::zeros(3, 4, CV_64FC1);
         cv::Mat eye_mat = cv::Mat::eye(3, 3, CV_64FC1);
@@ -1098,10 +1117,37 @@ void Tracking::UpdateLastFrame()
             {
                 continue;
             }
-            if (pe1 < pix_thr && pe2 < pix_thr)
+            double sigma2t1 = sqrt(sigmaLevels2[pt_trips[i][0].octave]);
+            double sigma2t2 = sqrt(sigmaLevels2[pt_trips[i][1].octave]);
+            //if (pe1 < pix_thr && pe2 < pix_thr)
+            if (pe1 < 3*sigma2t1 && pe2 < 3*sigma2t2)
             {
                 point_triplets_fin.push_back(pt_trips[i]);
                 pts3d.push_back(X);
+
+//                Eigen::Matrix3d J_s;
+//                GetStereoJac(X, -t12(0), &J_s);
+                Eigen::Matrix<double, 2, 3> J_m1, J_m2;
+                GetMonoJac(X, &J_m1);
+                GetMonoJac(X+t12, &J_m2);
+                Eigen::Matrix<double, 4, 3> J_tot;
+                J_tot.block<2,3>(0,0) = J_m1;
+                J_tot.block<2,3>(2,0) = J_m2;
+                double sigma2triang1 = sigmaLevels2[pt_trips[i][0].octave] / K(0,0) / K(0,0);
+                double sigma2triang2 = sigmaLevels2[pt_trips[i][1].octave] / K(0,0) / K(0,0);
+                double sigma2pnp = sigmaLevels2[pt_trips[i][2].octave];
+                Eigen::Matrix4d SigmaObs;
+                SigmaObs.setZero();
+                for (int ii = 0; ii < 2; ii++)
+                {
+                    SigmaObs(ii, ii) = sigma2triang1;
+                    SigmaObs(ii+2, ii+2) = sigma2triang2;
+                }
+                Eigen::Matrix3d JJi = (J_tot.transpose() * J_tot).inverse();
+                Eigen::Matrix3d S3D = JJi * J_tot.transpose() * SigmaObs * J_tot * JJi;
+                sigma3full->push_back(S3D);
+                sigma3->push_back(S3D.trace() * 0.33333);
+                sigma2->push_back(sigma2pnp);
             } else {
                 wrong_lr_p->push_back(i);
             }
@@ -1110,13 +1156,274 @@ void Tracking::UpdateLastFrame()
         *pt_trips_fin_p = point_triplets_fin;
     }
 
+
+    bool Tracking::TrackReferencePNP()
+    {
+
+        UpdateLastFrame();
+
+        // Compute Bag of Words vector
+        mCurrentFrame.ComputeBoW();
+
+        // We perform first an ORB matching with the reference keyframe
+        // If enough matches are found we setup a PnP solver
+        ORBmatcher matcher(0.7,true);
+
+        bool is_map_pt_required = false;
+
+//        vector<MapPoint*> vpMapPointMatches, vpMapPointMatchesR;
+        std::vector<std::pair<cv::KeyPoint, cv::KeyPoint>> kps, kpsR;
+//        int nmatches = matcher.SearchByBoWKP(mpReferenceKF,mCurrentFrame,kps,vpMapPointMatches,false, is_map_pt_required);
+//        int nmatches_right = matcher.SearchByBoWKP(mpReferenceKF,mCurrentFrame,kpsR,vpMapPointMatchesR,true, is_map_pt_required);
+
+        int nmatches = matcher.SearchByBoWF(&mLastFrame, mCurrentFrame, kps, false);
+        int nmatches_right = matcher.SearchByBoWF(&mLastFrame, mCurrentFrame, kpsR, true);
+
+        if(nmatches+nmatches_right<7) {
+            std::cout << " low No. of matches " << nmatches+nmatches_right << std::endl;
+            return false;
+        }
+
+        std::cout << "pnp mode " << mnPnpRelocMode << " found " << nmatches << " " << nmatches_right  << " matches. " << std::endl;
+
+        //we form 4 sets of triplet matches between left-right-left  and right-left-right camera views,
+        // and then we run SEGOLoop/P3PLoop to estimate camera motion using RANSAC
+        cv::Mat Tcw;
+        Eigen::Matrix3d K;
+        cv::cv2eigen(mCurrentFrame.mK, K);
+        double thr = 6;
+        Eigen::Vector3d b(-mCurrentFrame.mb, 0, 0);
+
+        //we form left-right-left (0,1,2) matches
+        std::vector<std::vector<cv::KeyPoint>> set_lrl, set_lrl_fin;
+        for (size_t i = 0; i < kps.size(); i++)
+        {
+            if (kps[i].first.pt.x>=0) //(!is_map_pt_required  || vpMapPointMatches[i])
+            {
+                std::vector<cv::KeyPoint> kp_vec{kps[i].first, kps[i].second, mCurrentFrame.mvKeys[i]};
+                set_lrl.push_back(kp_vec);
+            }
+        }
+        //we triangulate the features and filter out those not located well
+        std::vector<Eigen::Vector3d> pts3d_lrl;
+        std::vector<int> wrong_lr;
+        std::vector<float> sigma2_lr;
+        std::vector<float> sigma3_lr;
+        std::vector<Eigen::Matrix3d> sigma3full_lr;
+        TriangulateLRPoints(set_lrl, b, K, mCurrentFrame.mvLevelSigma2, thr,
+                            &pts3d_lrl, &set_lrl_fin, &wrong_lr, &sigma2_lr, &sigma3_lr, &sigma3full_lr);
+
+        std::cout << " triangulated " << pts3d_lrl.size() << " " << set_lrl_fin.size() << std::endl;
+
+        //we form right-left-right (1,0,3) matches
+        std::vector<std::vector<cv::KeyPoint>> set_rlr, set_rlr_fin;
+        for (size_t i = 0; i < kpsR.size(); i++)
+        {
+            if (true) //(!is_map_pt_required || vpMapPointMatchesR[i])
+            {
+                std::vector<cv::KeyPoint> kp_vec{kpsR[i].second, kpsR[i].first, mCurrentFrame.mvKeysRight[i]};
+                set_rlr.push_back(kp_vec);
+            }
+        }
+
+        double fu = mCurrentFrame.fx;
+        double fv = mCurrentFrame.fy;
+        double uc = mCurrentFrame.cx;
+        double vc = mCurrentFrame.cy;
+
+        std::vector<cv::Point2f> p2D;
+        std::vector<cv::Point3f> p3D;
+        std::vector<size_t> keyPointIndices;
+        std::vector<size_t> allIndices;
+        for (int i = 0; i < pts3d_lrl.size(); i++)
+        {
+            p2D.push_back(set_lrl_fin[i][2].pt);
+            Eigen::Vector3d X = pts3d_lrl[i];
+            p3D.push_back(cv::Point3f(X(0), X(1), X(2)));
+            keyPointIndices.push_back(i);
+            allIndices.push_back(i);
+        }
+        int nMapPoints = p3D.size();
+
+        bool is_debug_mode = true;
+        std::string fid = std::to_string(mCurrentFrame.mnId);
+        std::string debug_path = "/home/alexander/materials/pnp3d/segoexp/pnpu_debug/" + fid + "_debug_method.txt";
+        std::string debug_pose_path = "/home/alexander/materials/pnp3d/segoexp/pnpu_debug/" + fid + "_debug_pose.txt";
+        std::string full_debug_pose_path = "/home/alexander/materials/pnp3d/segoexp/pnpu_debug/" + fid + "_full_debug_pose.txt";
+
+        PnPsolver* pnpSolver = new PnPsolver(p2D, sigma2_lr, p3D, keyPointIndices, allIndices, fu, fv, uc, vc,
+                                             nMapPoints,
+                                             sigma3_lr,
+                                             sigma3full_lr,
+                                             mnPnpRelocMode,
+                                             mbIsURansac, mdPnPCoeff, is_debug_mode, debug_path, debug_pose_path, full_debug_pose_path);
+
+        pnpSolver->SetRansacParameters(0.99, 8, 300, 4, 0.1, thr);
+        int nInliers;
+        bool bNoMore;
+        std::vector<bool> vbInliers;
+        Tcw = pnpSolver->iterate(500,bNoMore,vbInliers,nInliers);
+
+        if (Tcw.empty())
+        {
+            std::cout << " ransac-pnp failed " << std::endl;
+        }
+
+        std::cout << " --- " << nInliers << std::endl;
+
+
+        std::string ref_log_path = "/home/alexander/materials/pnp3d/segoexp/pnpu_debug/" + fid + "_reflog.txt";
+        std::ofstream ref_out(ref_log_path);
+        //ref_out << mpReferenceKF->mnFrameId << std::endl;
+
+        ref_out << mLastFrame.mnId << std::endl;
+
+        Eigen::Matrix4d Tcw_eig;
+        Tcw_eig.setIdentity();
+        if (!Tcw.empty())
+        {
+            cv::cv2eigen(Tcw, Tcw_eig);
+        }
+
+        std::string pose_log_path = "/home/alexander/materials/pnp3d/segoexp/pnpu_debug/" + fid + "_posesest.txt";
+        std::ofstream pose_out(pose_log_path);
+        for (int i = 0; i < 3; i++)
+        {
+            for (int j = 0; j < 4; j++)
+            {
+                pose_out << Tcw_eig(i, j) << " ";
+            }
+        }
+
+        bool is_3d = true;
+        if (Tcw.empty() || nInliers < 5)
+        {
+        }
+
+
+        //we decode and store the inliers
+        if (!Tcw.empty() && nInliers > 5)
+        {
+
+            Eigen::Matrix4d T_ref_init, T_ref_fin;
+            cv::cv2eigen(Tcw, T_ref_init);
+
+            int ref_type = 0;
+            if (mnPnpRelocMode > 0)
+            {
+                ref_type = 1;
+            }
+            G2O_Pose pose_ref(ref_type, 5.991, K, T_ref_init, false, "");
+            double s3dmin = -1;
+            double s3dmax = -1;
+
+            std::vector<bool> vbInliersFin = vbInliers;
+            int nInliersFin = pose_ref.Refine(&T_ref_fin, p2D, sigma2_lr, p3D, sigma3_lr, sigma3full_lr, vbInliersFin,
+                                              s3dmin, s3dmax);
+
+            for (int i = 0; i < 3; i++)
+            {
+                for (int j = 0; j < 4; j++)
+                {
+                    pose_out << T_ref_fin(i, j) << " ";
+                }
+            }
+
+            if (nInliersFin > 0)
+            {
+                Tcw = Converter::toCvMat(T_ref_fin);
+                nInliers = nInliersFin;
+                vbInliers = vbInliersFin;
+            } else {
+                std::cout << " refine failed " << std::endl;
+            }
+
+            mCurrentFrame.SetPose(Tcw * mLastFrame.mTcw);
+
+            ORBmatcher matcher(0.9,true);
+
+            // Update last frame pose according to its reference keyframe
+            // Create "visual odometry" points if in Localization Mode
+            fill(mCurrentFrame.mvpMapPoints.begin(),mCurrentFrame.mvpMapPoints.end(),static_cast<MapPoint*>(NULL));
+
+            // Project points seen in previous frame
+            int th;
+            if(mSensor!=System::STEREO || mnPnpRelocMode>0)
+                th=15;
+            else
+                th=7;
+            int nmatches = 0;
+            if (!mLastFrame.mTcw.empty())
+                matcher.SearchByProjection(mCurrentFrame,mLastFrame,th,mSensor==System::MONOCULAR);
+
+            // If few matches, uses a wider window search
+            if(nmatches<20 && !mLastFrame.mTcw.empty())
+            {
+                fill(mCurrentFrame.mvpMapPoints.begin(),mCurrentFrame.mvpMapPoints.end(),static_cast<MapPoint*>(NULL));
+                nmatches = matcher.SearchByProjection(mCurrentFrame,mLastFrame,2*th,mSensor==System::MONOCULAR);
+            }
+
+        } else {
+            vector<MapPoint*> vpMapPointMatches;
+            std::vector<std::pair<cv::KeyPoint, cv::KeyPoint>> kps;
+            nmatches = matcher.SearchByBoWKP(mpReferenceKF,mCurrentFrame,kps,vpMapPointMatches,false, true);
+            mCurrentFrame.mvpMapPoints = vpMapPointMatches;
+            if (!mLastFrame.mTcw.empty()) {
+                mCurrentFrame.SetPose(mLastFrame.mTcw);
+            } else {
+                return false;
+            }
+        }
+
+
+        if (!mbNoPoseOpt)
+        {
+            int relocCovMode = 2;
+            if (!mbIsCovOpt || !is_3d)
+            {
+                relocCovMode = 0;
+            }
+            int inliers_opt = Optimizer::PoseOptimization(&mCurrentFrame, relocCovMode, mdPnPCoeff);
+            if (inliers_opt < 10 && mbIsCovOpt)
+            {
+                inliers_opt = Optimizer::CovPoseOptimization(&mCurrentFrame, 1, mdPnPCoeff, 80);
+            }
+        }
+
+        // Discard outliers
+        int nmatchesMap = 0;
+        for(int i =0; i<mCurrentFrame.N; i++)
+        {
+            if(mCurrentFrame.mvpMapPoints[i])
+            {
+                if(mCurrentFrame.mvbOutlier[i])
+                {
+                    MapPoint* pMP = mCurrentFrame.mvpMapPoints[i];
+
+                    mCurrentFrame.mvpMapPoints[i]=static_cast<MapPoint*>(NULL);
+                    mCurrentFrame.mvbOutlier[i]=false;
+                    pMP->mbTrackInView = false;
+                    pMP->mnLastFrameSeen = mCurrentFrame.mnId;
+                    nmatches--;
+                }
+                else if(mCurrentFrame.mvpMapPoints[i]->Observations()>0)
+                    nmatchesMap++;
+            }
+        }
+//        std::cout << " pnp result " << (nmatchesMap>=10) << " total feaure count " << nmatchesMap << std::endl;
+        return nmatchesMap>=10;
+    }
+
     bool Tracking::TrackReferenceSego()
     {
+        return TrackReferencePNP();
 
         if (!bSegoRecovery)
         {
             return Tracking::TrackReferenceKeyFrame();
         }
+
+        UpdateLastFrame();
 
         // Compute Bag of Words vector
         mCurrentFrame.ComputeBoW();
@@ -1155,7 +1462,11 @@ void Tracking::UpdateLastFrame()
         //we triangulate the features and filter out those not located well
         std::vector<Eigen::Vector3d> pts3d_lrl;
         std::vector<int> wrong_lr;
-        TriangulateLRPoints(set_lrl, b, K,thr, &pts3d_lrl, &set_lrl_fin, &wrong_lr);
+        std::vector<float> sigma2;
+        std::vector<float> sigma3;
+        std::vector<Eigen::Matrix3d> sigma3full;
+        TriangulateLRPoints(set_lrl, b, K, mCurrentFrame.mvLevelSigma2, thr, &pts3d_lrl, &set_lrl_fin, &wrong_lr,
+                            &sigma2, &sigma2, &sigma3full);
 
         //we form right-left-right (1,0,3) matches
         std::vector<std::vector<cv::KeyPoint>> set_rlr, set_rlr_fin;
@@ -1170,7 +1481,8 @@ void Tracking::UpdateLastFrame()
         //we triangulate the features and filter out those not located well
         std::vector<Eigen::Vector3d> pts3d_rlr;
         std::vector<int> wrong_rl;
-        TriangulateLRPoints(set_rlr, -b, K,thr, &pts3d_rlr, &set_rlr_fin, &wrong_rl);
+        TriangulateLRPoints(set_rlr, -b, K, mCurrentFrame.mvLevelSigma2, thr, &pts3d_rlr, &set_rlr_fin, &wrong_rl,
+                            &sigma2, &sigma2, &sigma3full);
 
         std::vector<std::vector<std::vector<cv::KeyPoint>>> pt_trips_sets{set_lrl_fin, set_rlr_fin, std::vector<std::vector<cv::KeyPoint>>(), std::vector<std::vector<cv::KeyPoint>>()};
         std::vector<std::vector<Eigen::Vector3d>> pts3d_for_trips{pts3d_lrl, pts3d_rlr, std::vector<Eigen::Vector3d>(), std::vector<Eigen::Vector3d>()};
@@ -1264,10 +1576,12 @@ void Tracking::UpdateLastFrame()
                 th=15;
             else
                 th=7;
-            int nmatches = matcher.SearchByProjection(mCurrentFrame,mLastFrame,th,mSensor==System::MONOCULAR);
+            int nmatches = 0;
+            if (!mLastFrame.mTcw.empty())
+                matcher.SearchByProjection(mCurrentFrame,mLastFrame,th,mSensor==System::MONOCULAR);
 
             // If few matches, uses a wider window search
-            if(nmatches<20)
+            if(nmatches<20 && !mLastFrame.mTcw.empty())
             {
                 fill(mCurrentFrame.mvpMapPoints.begin(),mCurrentFrame.mvpMapPoints.end(),static_cast<MapPoint*>(NULL));
                 nmatches = matcher.SearchByProjection(mCurrentFrame,mLastFrame,2*th,mSensor==System::MONOCULAR);
@@ -1284,8 +1598,14 @@ void Tracking::UpdateLastFrame()
         }
 
 
+        if (!mbNoPoseOpt)
+        {
+            Optimizer::PoseOptimization(&mCurrentFrame);
+        }
+//        else {
+//            Optimizer::PoseOptimization(&mCurrentFrame, -1);
+//        }
 
-        Optimizer::PoseOptimization(&mCurrentFrame);
 
         // Discard outliers
         int nmatchesMap = 0;
@@ -1317,6 +1637,7 @@ void Tracking::UpdateLastFrame()
 
 bool Tracking::TrackWithMotionModel()
 {
+//    std::cout << " track mm " << std::endl;
     ORBmatcher matcher(0.9,true);
 
     // Update last frame pose according to its reference keyframe
@@ -1388,7 +1709,20 @@ bool Tracking::TrackLocalMap()
     SearchLocalPoints();
 
     // Optimize Pose
-    Optimizer::PoseOptimization(&mCurrentFrame);
+    if (!mbNoPoseOpt)
+    {
+        int relocCovMode = 2;
+        if (!mbIsCovOpt)
+        {
+            relocCovMode = 0;
+        }
+        int n_pt_found = Optimizer::PoseOptimization(&mCurrentFrame, relocCovMode, mdPnPCoeff);
+        if (n_pt_found < 30 && relocCovMode == 2)
+        {
+            Optimizer::CovPoseOptimization(&mCurrentFrame, relocCovMode, mdPnPCoeff, 80);
+        }
+    }
+
     mnMatchesInliers = 0;
 
     // Update MapPoints Statistics
@@ -1562,7 +1896,9 @@ void Tracking::CreateNewKeyFrame()
                 if(bCreateNew)
                 {
                     cv::Mat x3D = mCurrentFrame.UnprojectStereo(i);
+                    cv::Mat s3D = mCurrentFrame.UnprojectCov(i);
                     MapPoint* pNewMP = new MapPoint(x3D,pKF,mpMap);
+//                    pNewMP->SetWorldCov(s3D);
                     pNewMP->AddObservation(pKF,i);
                     pKF->AddMapPoint(pNewMP,i);
                     pNewMP->ComputeDistinctiveDescriptors();
@@ -1789,95 +2125,34 @@ void Tracking::UpdateLocalKeyFrames()
     }
 }
 
-    typedef std::vector<Eigen::Matrix4d, Eigen::aligned_allocator<Eigen::Matrix4d>> posevector;
-
-    void RunEPnPU(const Eigen::Matrix3d& Re, const Eigen::Vector3d& te, const std::vector<cv::KeyPoint>& keypts,
-                  const std::vector<float>& sigma_levels_2, const std::vector<Eigen::Vector3d>& XX,
-                  const std::vector<Eigen::Matrix3d>& Sigmas3dGlobal, const Eigen::Matrix3d& K, int mode,
-                  posevector* sols_epnp_p)
-    {
-        Eigen::Vector3d Xm;
-        Xm.setZero();
-//    for (int i = 0; i < XX.size(); i++)
-//    {
-//        Xm = Xm + XX[i];
-//    }
-//    Xm = Xm / XX.size();
-//
-        int n_point = keypts.size();
-        cv::Mat p3d(n_point, 3, CV_32FC1);
-        for (int i = 0; i < n_point; i++)
-        {
-            for (int j = 0; j < 3; j++)
-            {
-                p3d.at<float>(i, j) = XX[i](j) - Xm(j);
-            }
-
-        }
-
-        for (int i = 0; i < Sigmas3dGlobal.size(); i++)
-        {
-            if (isnanf(Sigmas3dGlobal[i].determinant()))
-            {
-                std::cout <<"nan sigma before pnpu " << std::endl;
-            }
-        }
-
-        ORB_SLAM2::PnPUsolver pnp_solver(keypts, sigma_levels_2, p3d, Sigmas3dGlobal, K(0, 0), K(1, 1), K(0, 2), K(1, 2), mode);
-        Eigen::Matrix3d R_est;
-        Eigen::Vector3d t_est;
-        if (pnp_solver.SolveForAll(Re, te, &R_est, &t_est))
-        {
-            std::cout << " solved " << Re << " " << R_est << std::endl;
-            Eigen::Matrix4d T;
-            T.setIdentity();
-            T.block<3, 3>(0, 0) = R_est;
-            T.block<3, 1>(0, 3) = t_est-R_est * Xm;
-            sols_epnp_p->push_back(T);
-        } else {
-            std::cout << " not solved " << std::endl;
-        }
-    }
-
-    typedef std::vector<Eigen::Vector2d, Eigen::aligned_allocator<Eigen::Vector2d>> vec2d;
-
-//    int FindBestSolutionReproj(const std::vector<Eigen::Vector3d>& XX, const vec2d& xx, const Eigen::Matrix3d& K,
-//                               const posevector& poses, double* min_err_p)
-//    {
-//        double min_err = 1e100;
-//        int sol_ind = -1;
-//        for (int i = 0; i < poses.size(); i++)
-//        {
-//            auto T = poses[i];
-//            double err = 0;
-//            for (int j = 0; j < XX.size(); j++)
-//            {
-//                Eigen::Vector3d xc = K*(T.block<3,3>(0,0) * XX[i] + T.block<3,1>(0,3));
-//                xc = xc / xc(2);
-//                err += (xc.segment<2>(0) - xx[i]).norm();
-//            }
-//            if (err < min_err)
-//            {
-//                min_err = err;
-//                sol_ind = i;
-//            }
-//        }
-//        *min_err_p = min_err / XX.size();
-//        return sol_ind;
-//    }
-
-bool Tracking::Relocalization()
+bool Tracking::Relocalization(bool is_strong)
 {
-    std::cout << " Reloc run " << std::endl;
+    if (is_strong)
+    {
+        return Relocalization(false);
+    }
+    int relocCovMode = 2;
+    if (!mbIsCovOpt)
+    {
+        relocCovMode = 0;
+    }
+//    std::cout << " Reloc run " << std::endl;
     // Compute Bag of Words Vector
     mCurrentFrame.ComputeBoW();
 
     // Relocalization is performed when tracking is lost
     // Track Lost: Query KeyFrame Database for keyframe candidates for relocalisation
-    vector<KeyFrame*> vpCandidateKFs = mpKeyFrameDB->DetectRelocalizationCandidates(&mCurrentFrame);
+    vector<KeyFrame*> vpCandidateKFs = mpKeyFrameDB->DetectRelocalizationCandidates(&mCurrentFrame, is_strong);
+    if (vpCandidateKFs.empty()) {
+        std::cout << " no candidates for reloc " << std::endl;
+        if (is_strong)
+        {
+            return Relocalization(false);
+        } else {
+//            vpCandidateKFs.push_back(mpLastKeyFrame);
+        }
+    }
 
-    if(vpCandidateKFs.empty())
-        return false;
 
     const int nKFs = vpCandidateKFs.size();
 
@@ -1888,9 +2163,6 @@ bool Tracking::Relocalization()
     vector<PnPsolver*> vpPnPsolvers;
     vpPnPsolvers.resize(nKFs);
 
-    vector<PnPUsolver2*> vpPnPUsolvers;
-    vpPnPUsolvers.resize(nKFs);
-
     vector<vector<MapPoint*> > vvpMapPointMatches;
     vvpMapPointMatches.resize(nKFs);
 
@@ -1899,9 +2171,13 @@ bool Tracking::Relocalization()
 
     int nCandidates=0;
 
+    std::string frameLog = "";
+    std::string allFrameLog = "";
+
     for(int i=0; i<nKFs; i++)
     {
         KeyFrame* pKF = vpCandidateKFs[i];
+        allFrameLog += std::to_string(pKF->mnFrameId) + " ";
         if(pKF->isBad())
             vbDiscarded[i] = true;
         else
@@ -1914,14 +2190,17 @@ bool Tracking::Relocalization()
             }
             else
             {
-                PnPsolver *pSolver = SetupPnP(mCurrentFrame, vvpMapPointMatches[i]);
-                pSolver->SetRansacParameters(0.99, 10, 300, 4, 0.5, 5.991);
-                vpPnPsolvers[i] = pSolver;
+//                PnPsolver *pSolver = SetupPnP(mCurrentFrame, vvpMapPointMatches[i], *pKF);
+//                //pSolver->SetRansacParameters(0.99, 10, 300, 4, 0.5, 5.991);
+//                pSolver->SetRansacParameters(0.99, 8, 300, 4, 0.1, 5.991);
+//                vpPnPsolvers[i] = pSolver;
                 nCandidates++;
-
+                frameLog += std::to_string(pKF->mnFrameId) + " ";
             }
         }
     }
+    std::cout << "Key Frames Considered For Reloc " << allFrameLog << std::endl;
+    std::cout << "Key Frames Chosen For Reloc " << frameLog << std::endl;
 
     // Alternatively perform some iterations of P4P RANSAC
     // Until we found a camera pose supported by enough inliers
@@ -1942,107 +2221,24 @@ bool Tracking::Relocalization()
 
             cv::Mat Tcw;
 
-            PnPsolver* pSolver = vpPnPsolvers[i];
-            Tcw = pSolver->iterate(5,bNoMore,vbInliers,nInliers);
+//            PnPsolver* pSolver = vpPnPsolvers[i];
+            KeyFrame* pKF = vpCandidateKFs[i];
+            PnPsolver *pSolver = SetupPnP(mCurrentFrame, vvpMapPointMatches[i], *pKF);
+            //pSolver->SetRansacParameters(0.99, 10, 300, 4, 0.5, 5.991);
+            pSolver->SetRansacParameters(0.99, 8, 300, 4, 0.1, 5.991);
+            Tcw = pSolver->iterate(500,bNoMore,vbInliers,nInliers);
 
-            std::cout << " pnpsolver output " << Tcw << std::endl;
-
-            if (bUseUncertainty && false)
+            if (mnPnpMode > 0 && !Tcw.empty())
             {
-//                void RunEPnPU(const Eigen::Matrix3d& Re, const Eigen::Vector3d& te, const std::vector<cv::KeyPoint>& keypts,
-//                              const std::vector<float>& sigma_levels_2, const std::vector<Eigen::Vector3d>& XX,
-//                              const std::vector<Eigen::Matrix3d>& Sigmas3dGlobal, const Eigen::Matrix3d& K, int mode,
-//                              posevector* sols_epnp_p)
-//                Eigen::Matrix4d T_eig;
-//                if (Tcw.cols > 0)
-//                {
-//                    cv::cv2eigen(Tcw, T_eig);
-//                } else {
-//                    T_eig.setIdentity();
-//                }
-//
-//                Eigen::Matrix3d Re = T_eig.block<3,3>(0,0);
-//                Eigen::Vector3d te = T_eig.block<3,1>(0,3);
-//                std::vector<cv::KeyPoint> keypts;
-//                std::vector<float> sigma_levels_2;
-//                std::vector<Eigen::Vector3d> XX;
-//                std::vector<Eigen::Matrix3d> Sigmas3dGlobal;
-//                vec2d xx;
-//                for (auto pMP: vvpMapPointMatches[i])
-//                {
-//                    if(pMP)
-//                    {
-//                        if(!pMP->isBad())
-//                        {
-//
-//                            cv::Mat S3d = pMP->GetWorldCov();
-//
-//
-//                            if (S3d.cols == 0)
-//                            {
-//                                continue;
-////                    S3d = cv::Mat::zeros(3, 3, CV_32F);
-//                            }
-//                            Eigen::Matrix3d Sigma3d_eig;
-//                            cv::cv2eigen(S3d, Sigma3d_eig);
-//                            if (Sigma3d_eig.determinant() == 0)
-//                            {
-//                                continue;
-//                            }
-//
-//                            std::cout << " obtained sigma3d " << S3d << std::endl;
-//
-//                            Sigmas3dGlobal.push_back(Sigma3d_eig);
-//
-//                            const cv::KeyPoint &kp = mCurrentFrame.mvKeysUn[i];
-//
-//                            keypts.push_back(kp);
-//
-//                            cv::Mat Pos = pMP->GetWorldPos();
-//                            XX.push_back(Eigen::Vector3d(Pos.at<float>(0),Pos.at<float>(1), Pos.at<float>(2)));
-//                            xx.push_back(Eigen::Vector2d(kp.pt.x, kp.pt.y));
-//                        }
-//                    }
-//
-//                }
-//                posevector sols_epnp;
-//                Eigen::Matrix3d K;
-//                K.setIdentity();
-//                K(0,0) = mCurrentFrame.fx;
-//                K(1,1) = mCurrentFrame.fy;
-//                K(0,2) = mCurrentFrame.cx;
-//                K(1,2) = mCurrentFrame.cy;
-//                int mode = 2;//mfull
-//                for (int oi = 0; oi < 8; oi++)
-//                {
-//                    sigma_levels_2.push_back(mCurrentFrame.mvLevelSigma2[oi]);
-//                }
-//                RunEPnPU(Re, te, keypts, sigma_levels_2, XX, Sigmas3dGlobal, K, mode, &sols_epnp);
-//                double min_err_epnp;
-//                int sol_ind = FindBestSolutionReproj(XX, xx, K, sols_epnp, &min_err_epnp);
-//
-//
-//
-//                if (sols_epnp.size() > 0 && sol_ind >= 0)
-//                {
-//                    for (int ri = 0; ri < 3; ri++ )
-//                    {
-//                        for (int ci = 0; ci < 4; ci++)
-//                        {
-//                            Tcw.at<float>(ri, ci) = sols_epnp[sol_ind](ri, ci);
-//                        }
-//                    }
-//                }
-//
-//                std::cout << " inliers " << XX.size() << std::endl;
-//                std::cout << sol_ind << " " <<std::endl;
-//                if (sol_ind >= 0)
-//                {
-//                    std::cout << sols_epnp[sol_ind] << std::endl;
-//                }
-//                std::cout << " solution " << Tcw << std::endl;
-
+                std::cout << " final refinement call start " << std::endl;
+                Tcw = pSolver->FinalRefinement(Tcw, vbInliers, nInliers);
+                std::cout << " final refinement call finish " << std::endl;
             }
+
+            miRelocFrameId = vpCandidateKFs[i]->mnFrameId;
+            miInlierCount = nInliers;
+
+//            std::cout << " pnpsolver output " << Tcw << std::endl;
 
 
             // If Ransac reachs max. iterations discard keyframe
@@ -2057,12 +2253,12 @@ bool Tracking::Relocalization()
             {
 //                std::cout << " found a pose " << std::endl;
 
-                Tcw.copyTo(mCurrentFrame.mTcw);
+//                Tcw.copyTo(mCurrentFrame.mTcw);
+                mCurrentFrame.SetPose(Tcw);
 
                 set<MapPoint*> sFound;
 
                 const int np = vbInliers.size();
-
                 for(int j=0; j<np; j++)
                 {
                     if(vbInliers[j])
@@ -2074,23 +2270,33 @@ bool Tracking::Relocalization()
                         mCurrentFrame.mvpMapPoints[j]=NULL;
                 }
 
-                int nGood = Optimizer::PoseOptimization(&mCurrentFrame);
+                int nGood = sFound.size();
+                if (!mbNoPoseOpt) {
+                    nGood = Optimizer::PoseOptimization(&mCurrentFrame, relocCovMode, mdPnPCoeff);
+                }
+//                else {
+//                    nGood = Optimizer::PoseOptimization(&mCurrentFrame, -1);
+//                }
 
-                if(nGood<10)
+                if(nGood < 10 || (nGood <= 50 && mbNoPoseOpt))
+                {
+                    nCandidates--;
                     continue;
+                }
+
 
                 for(int io =0; io<mCurrentFrame.N; io++)
                     if(mCurrentFrame.mvbOutlier[io])
                         mCurrentFrame.mvpMapPoints[io]=static_cast<MapPoint*>(NULL);
 
                 // If few inliers, search by projection in a coarse window and optimize again
-                if(nGood<50)
+                if(nGood < 50 && !mbNoPoseOpt)
                 {
                     int nadditional =matcher2.SearchByProjection(mCurrentFrame,vpCandidateKFs[i],sFound,10,100);
 
                     if(nadditional+nGood>=50)
                     {
-                        nGood = Optimizer::PoseOptimization(&mCurrentFrame);
+                        nGood = Optimizer::PoseOptimization(&mCurrentFrame, relocCovMode, mdPnPCoeff);
 
                         // If many inliers but still not enough, search by projection again in a narrower window
                         // the camera has been already optimized with many points
@@ -2105,7 +2311,7 @@ bool Tracking::Relocalization()
                             // Final optimization
                             if(nGood+nadditional>=50)
                             {
-                                nGood = Optimizer::PoseOptimization(&mCurrentFrame);
+                                nGood = Optimizer::PoseOptimization(&mCurrentFrame, relocCovMode, mdPnPCoeff);
 
                                 for(int io =0; io<mCurrentFrame.N; io++)
                                     if(mCurrentFrame.mvbOutlier[io])
@@ -2122,6 +2328,9 @@ bool Tracking::Relocalization()
                     std::cout << " reloc successful " << std::endl;
                     bMatch = true;
                     break;
+                } else {
+                    nCandidates--;
+                    continue;
                 }
             }
         }
@@ -2132,6 +2341,10 @@ bool Tracking::Relocalization()
     if(!bMatch)
     {
         std::cout << " reloc unsuccessful " << std::endl;
+        if (is_strong)
+        {
+            return Relocalization(false);
+        }
         return false;
     }
     else
@@ -2226,9 +2439,18 @@ void Tracking::ChangeCalibration(const string &strSettingPath)
 void Tracking::InformOnlyTracking(const bool &flag)
 {
     mbOnlyTracking = flag;
+    //testing upnp
     mVelocity = cv::Mat();
 }
 
-
+void Tracking::SetNewPnpMode(int newMode, bool isPoseOpt, bool isCovOpt, bool isURansac, double coeff)
+{
+    mnPnpMode = newMode;
+    mnPnpRelocMode = newMode;
+    mbNoPoseOpt = !isPoseOpt;
+    mbIsCovOpt = isCovOpt;
+    mbIsURansac = isURansac;
+    mdPnPCoeff = coeff;
+}
 
 } //namespace ORB_SLAM

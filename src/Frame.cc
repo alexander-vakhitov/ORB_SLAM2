@@ -700,6 +700,19 @@ void Frame::ComputeStereoFromRGBD(const cv::Mat &imDepth)
 
 cv::Mat Frame::UnprojectStereo(const int &i)
 {
+    //sigma_disp = sigma_x_l + sigma_x_r
+    //let sigma_x_l = sigma_x_r =>
+    //sigma_disp = 2 * sigma_x
+    //mvDepth[iL] = mbf / disparity;
+    //sigma_z = ( b * f / d^2) * sigma_disp = ( b * f / d^2) * 2 * sigma_x = k_z * sigma_x
+    //x := (u-cx) * b / disparity
+    //sigma_X = b / d * sigma_x + |u-cx| * b * (1/d^2) * 2 * sigma_x = (b / d + |u-cx| * b * (1/d^2) * 2) * sigma_x =
+    //        = k_x * sigma_x
+    //sigma_XZ = k_x * k_z * sigma_x * sigma_x
+    //y := (v-cy) * b / disparity
+    //sigma_Y = b / d * sigma_y + (v-cy) * b * (1/d^2) * 2 * sigma_x = k_y * sigma_y + k_yx * sigma_x
+    //sigma_YZ = k_yx * k_z * sigma_x * sigma_x
+    //sigma_XY = k_yx * k_x * sigma_x * sigma_x
     const float z = mvDepth[i];
     if(z>0)
     {
@@ -709,6 +722,42 @@ cv::Mat Frame::UnprojectStereo(const int &i)
         const float y = (v-cy)*z*invfy;
         cv::Mat x3Dc = (cv::Mat_<float>(3,1) << x, y, z);
         return mRwc*x3Dc+mOw;
+    }
+    else
+        return cv::Mat();
+}
+
+cv::Mat Frame::UnprojectPointCovFromParams(float z, float x, float y, float sigma_x_2,
+        float cx, float cy, float b, float f, const cv::Mat& Rwc)
+{
+
+    Eigen::Matrix3d J;
+    J.setZero();
+    J(0, 0) = 1.0 / z;
+    J(0, 2) = - x / z / z;
+    J(1, 1) = 1.0 / z;
+    J(1, 2) = - y / z;
+    J(2, 0) = 1.0 / z;
+    J(2, 2) = - (x-b) / z / z;
+    Eigen::Matrix3d JJ = J.transpose() * J;
+    Eigen::Matrix3d S3d_eig = JJ.inverse()*J.transpose()*Eigen::Matrix3d::Identity()*sigma_x_2/f/f*J*JJ.inverse();
+    cv::Mat s3D = Converter::toCvMat(S3d_eig);
+    return Rwc * s3D * Rwc.t();
+//    return cv::Mat();
+}
+
+cv::Mat Frame::UnprojectCov(const int &i)
+{
+    const float z = mvDepth[i];
+    const float x = mvKeys[i].pt.x;
+    const float y = mvKeys[i].pt.y;
+    if(z > 0 && fabs(mvKeys[i].pt.x - cx) > 0)
+    {
+        float sigma_x_2 = 1.0 / mvInvLevelSigma2[mvKeys[i].octave];
+        cv::Mat s3D = UnprojectPointCovFromParams(z, x, y, sigma_x_2, cx, cy, mb, fx, mRwc);
+//        std::cout << " Frame s3D for point " << i << std::endl;
+//        std::cout << s3D << std::endl;
+        return s3D;
     }
     else
         return cv::Mat();

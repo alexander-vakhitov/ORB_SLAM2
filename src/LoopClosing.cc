@@ -498,6 +498,17 @@ void LoopClosing::CorrectLoop()
                 pMPi->mnCorrectedByKF = mpCurrentKF->mnId;
                 pMPi->mnCorrectedReference = pKFi->mnId;
                 pMPi->UpdateNormalAndDepth();
+
+//                cv::Mat cov_init = pMPi->GetWorldCov();
+//                if (cov_init.cols == 3) {
+//                    Eigen::Matrix3d cov_eig_init = Converter::toMatrix3d(cov_init);
+//                    Eigen::Matrix3d rot_eig =
+//                            g2oCorrectedSwi.rotation().toRotationMatrix() * g2oSiw.rotation().toRotationMatrix();
+//                    cov_eig_init = rot_eig * cov_eig_init * rot_eig.transpose();
+//                    cv::Mat cov = Converter::toCvMat(cov_eig_init);
+//                    pMPi->SetWorldCov(cov);
+//                }
+
             }
 
             // Update keyframe pose with corrected Sim3. First transform Sim3 to SE3 (scale translation)
@@ -714,25 +725,29 @@ void LoopClosing::RunGlobalBundleAdjustment(unsigned long nLoopKF)
                     // If optimized by Global BA, just update
                     pMP->SetWorldPos(pMP->mPosGBA);
                 }
-                else
-                {
+                else {
                     // Update according to the correction of its reference keyframe
-                    KeyFrame* pRefKF = pMP->GetReferenceKeyFrame();
+                    KeyFrame *pRefKF = pMP->GetReferenceKeyFrame();
 
-                    if(pRefKF->mnBAGlobalForKF!=nLoopKF)
+                    if (pRefKF->mnBAGlobalForKF != nLoopKF)
                         continue;
 
                     // Map to non-corrected camera
-                    cv::Mat Rcw = pRefKF->mTcwBefGBA.rowRange(0,3).colRange(0,3);
-                    cv::Mat tcw = pRefKF->mTcwBefGBA.rowRange(0,3).col(3);
-                    cv::Mat Xc = Rcw*pMP->GetWorldPos()+tcw;
+                    cv::Mat Rcw = pRefKF->mTcwBefGBA.rowRange(0, 3).colRange(0, 3);
+                    cv::Mat tcw = pRefKF->mTcwBefGBA.rowRange(0, 3).col(3);
+                    cv::Mat Xc = Rcw * pMP->GetWorldPos() + tcw;
 
                     // Backproject using corrected camera
                     cv::Mat Twc = pRefKF->GetPoseInverse();
-                    cv::Mat Rwc = Twc.rowRange(0,3).colRange(0,3);
-                    cv::Mat twc = Twc.rowRange(0,3).col(3);
+                    cv::Mat Rwc = Twc.rowRange(0, 3).colRange(0, 3);
+                    cv::Mat twc = Twc.rowRange(0, 3).col(3);
 
-                    pMP->SetWorldPos(Rwc*Xc+twc);
+                    pMP->SetWorldPos(Rwc * Xc + twc);
+//                    cv::Mat cov = pMP->GetWorldCov();
+//                    if (cov.cols == 3) {
+//                        auto cov_upd = Rwc * Rcw * cov * Rcw.t() * Rwc.t();
+//                        pMP->SetWorldCov(cov_upd);
+//                    }
                 }
             }            
 

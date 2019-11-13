@@ -74,7 +74,7 @@ namespace ORB_SLAM2 {
                          const std::vector<float> &sigmas_3d,
                          const std::vector<Eigen::Matrix3d> &sigmas_3d_full,
                          int mode, bool is_u_ransac, double thrCoeff, bool is_debug_mode, const std::string& debug_path,
-                         const std::string& debug_pose_path, const std::string& full_debug_path) :
+                         const std::string& debug_pose_path):
             pws(0), us(0), alphas(0), pcs(0), maximum_number_of_correspondences(0), number_of_correspondences(0),
             mnInliersi(0),
             mnIterations(0), mnBestInliers(0), N(0),
@@ -82,9 +82,8 @@ namespace ORB_SLAM2 {
             fu(fu), fv(fv), uc(uc), vc(vc), nMapPoints(nMapPoints), sigmas_3d(sigmas_3d), sigmas_3d_full(sigmas_3d_full),
             mode(mode),
             N_lines(0),alphas_start(0), alphas_end(0), maximum_number_of_line_correspondences(0), number_of_line_correspondences(0),
-            mnRefinedInliersLinesi(0), mnInliersLinesi(0), is_u_ransac(is_u_ransac), bUseLines(false),
-            is_debug_mode(is_debug_mode), debug_path(debug_path), debug_pose_path(debug_pose_path), is_debug_opened(false),
-            thrCoeff(thrCoeff)
+            mnRefinedInliersLinesi(0), is_u_ransac(is_u_ransac), thrCoeff (thrCoeff), bUseLines(false),
+            is_debug_mode(is_debug_mode), debug_path(debug_path), debug_pose_path(debug_pose_path), filter_bad_3d(true)
     {
 
         K.setIdentity();
@@ -96,24 +95,7 @@ namespace ORB_SLAM2 {
 
         SetRansacParameters();
 
-        if (is_debug_mode)
-        {
-            std::ofstream out_all(full_debug_path);
-            for (int i = 0; i < p2D.size(); i++)
-            {
-                out_all << p3D[i].x << " " << p3D[i].y << " " << p3D[i].z << " " << p2D[i].x << " " << p2D[i].y <<
-                                                                                                                     " " << sigma2[i] << " " << sigmas_3d[i] << " ";
-                for (int ii = 0; ii < 3; ii++)
-                {
-                    for (int j = 0; j < 3; j++)
-                    {
-                        out_all << sigmas_3d_full[i](ii, j) << " ";
-                    }
-                }
-                out_all << std::endl;
-            }
-        }
-
+        std::cout << " PnP setup: mode " << mode << " unc ransac " << is_u_ransac << " coeff " << thrCoeff << std::endl;
     }
 
 
@@ -218,10 +200,8 @@ namespace ORB_SLAM2 {
         return iterate(mRansacMaxIts, bFlag, vbInliers, nInliers);
     }
 
-    cv::Mat PnPsolver::iterate(int nIterations, bool &bNoMore, vector<bool> &vbInliers, int &nInliers) {
-
-        bool is_debug = false;
-
+    cv::Mat PnPsolver::iterate(int nIterations, bool &bNoMore, vector<bool> &vbInliers, int &nInliers)
+    {
         bNoMore = false;
         vbInliers.clear();
         nInliers = 0;
@@ -234,10 +214,6 @@ namespace ORB_SLAM2 {
 
         if (N < mRansacMinInliers) {
             bNoMore = true;
-            if (is_debug)
-            {
-                std::cout << " too few points " << std::endl;
-            }
             return cv::Mat();
         }
 
@@ -269,20 +245,15 @@ namespace ORB_SLAM2 {
             // Check inliers
             CheckInliers();
 
-            if (bUseLines) {
-                CheckInliersLines();
-            }
 
-            int allInliers = mnInliersi + mnInliersLinesi;
-            if (is_debug) {
-                std::cout << " ransac inliers " << mnInliersi << " need " << mRansacMinInliers << std::endl;
-            }
 
-            if (allInliers >= mRansacMinInliers) {
+//        std::cout << " ransac inliers " << mnInliersi << " need " << mRansacMinInliers << std::endl;
+
+            if (mnInliersi >= mRansacMinInliers) {
                 // If it is the best solution so far, save it
-                if (allInliers > mnBestInliers) {
+                if (mnInliersi > mnBestInliers) {
                     mvbBestInliers = mvbInliersi;
-                    mnBestInliers = allInliers ;
+                    mnBestInliers = mnInliersi;
 
                     cv::Mat Rcw(3, 3, CV_64F, mRi);
                     cv::Mat tcw(3, 1, CV_64F, mti);
@@ -293,29 +264,20 @@ namespace ORB_SLAM2 {
                     tcw.copyTo(mBestTcw.rowRange(0, 3).col(3));
                 }
 
-//                if (bUseLines) {
-//                    CheckInliersLines();
-//                }
-//                std::cout << " before refine inliers " << mnBestInliers << std::endl;
+                if (bUseLines) {
+                    CheckInliersLines();
+                }
+
                 if (Refine()) {
 //                    std::cout << " refined inliers " << mnRefinedInliers << " lines " << mnRefinedInliersLinesi << std::endl;
 
-                    nInliers = mnRefinedInliers + mnRefinedInliersLinesi;
+                    nInliers = mnRefinedInliers;
                     vbInliers = vector<bool>(nMapPoints, false);
                     for (int i = 0; i < N; i++) {
                         if (mvbRefinedInliers[i])
                             vbInliers[mvKeyPointIndices[i]] = true;
                     }
-                    if (is_debug)
-                    {
-                        std::cout << " returning refined answer" << std::endl;
-                    }
                     return mRefinedTcw.clone();
-                } else {
-                    if (is_debug)
-                    {
-                        std::cout << " refine failed" << std::endl;
-                    }
                 }
 
             }
@@ -334,11 +296,6 @@ namespace ORB_SLAM2 {
             }
         }
 
-        if (is_debug)
-        {
-            std::cout << " finish: no answer" << std::endl;
-        }
-
         return cv::Mat();
     }
 
@@ -347,7 +304,7 @@ namespace ORB_SLAM2 {
         this->mode = mode;
     }
 
-    cv::Mat PnPsolver::FinalRefinement(const cv::Mat& T_init, std::vector<bool>& inliersInit, int &nInliers)
+    cv::Mat PnPsolver::FinalRefinement(const cv::Mat& T_init, std::vector<bool>& vbInliers, int& nInliers)
     {
 //        mvbBestInliers = inliersInit;
         mBestTcw = T_init.clone();
@@ -355,16 +312,16 @@ namespace ORB_SLAM2 {
         if (bUseLines)
         {
             CheckInliersLines();
-//            std::cout << " line inliers checked " << std::endl;
+            std::cout << " line inliers checked " << std::endl;
         }
 
         if (Refine())
         {
             nInliers = mnRefinedInliers;
-            inliersInit = vector<bool>(nMapPoints, false);
+            vbInliers = vector<bool>(nMapPoints, false);
             for (int i = 0; i < N; i++) {
                 if (mvbRefinedInliers[i])
-                    inliersInit[mvKeyPointIndices[i]] = true;
+                    vbInliers[mvKeyPointIndices[i]] = true;
             }
 
             return mRefinedTcw;
@@ -410,20 +367,13 @@ namespace ORB_SLAM2 {
             } else {
                 std::cout << " error s2dn " << std::endl;
             }
-            Eigen::Matrix<double, 6, 6> sigma6d, sigma6dfull;
+            Eigen::Matrix<double, 6, 6> sigma6d;
             if (idx < mvSigmasLines3D.size())
             {
                 sigma6d = mvSigmasLines3D[idx];
             } else {
                 std::cout << " error s6d " << std::endl;
             }
-            if (idx < mvSigmasLines3DFull.size())
-            {
-                sigma6dfull = mvSigmasLines3DFull[idx];
-            } else {
-                std::cout << " error s6d full " << std::endl;
-            }
-
 //            std::cout << " adding line " << idx  << " all line eq num " << mvLineEqs.size() << std::endl;
             if (idx>=mvStartPts.size() || idx >= mvEndPts.size() || idx >= mvLineEqs.size())
             {
@@ -442,14 +392,14 @@ namespace ORB_SLAM2 {
 
 //            p_start = 0;
 //            p_fin = 1;
-//            Eigen::Matrix<double,6,6> SigmaFin;
+            Eigen::Matrix<double,6,6> SigmaFin;
 //            SigmaFin.block<3,3>(0,0) = CovLine3DPoints(sigma6d, p_start, p_start);
 //            SigmaFin.block<3,3>(0,3) = CovLine3DPoints(sigma6d, p_start, p_fin);
 //            SigmaFin.block<3,3>(3,0) = CovLine3DPoints(sigma6d, p_fin, p_start);
 //            SigmaFin.block<3,3>(3,3) = CovLine3DPoints(sigma6d, p_fin, p_fin);
 
-            add_line_correspondence(sigma2d, sigma2dn, sigma6d, sigma6dfull, Xs0, Xe0, mvLineEqs[idx],
-                    mvLineEqsNorm[idx], mvLineEndpts2dStart[idx], mvLineEndpts2dEnd[idx], mvMaxLineError[idx]/mTh2/mTh2,
+            add_line_correspondence(sigma2d, sigma2dn, sigma6d, Xs0, Xe0, mvLineEqs[idx],
+                    mvLineEqsNorm[idx], mvLineEndpts2dStart[idx], mvLineEndpts2dEnd[idx], mvMaxLineError[idx]/mTh2,
                     sigma6d.block<3,3>(3,3));
 
 //simple
@@ -492,7 +442,7 @@ namespace ORB_SLAM2 {
             {
                 S3D = sigmas_3d_full[idx];
             } else {
-                std::cout << " error s3d " <<idx << " " << sigmas_3d_full.size() << std::endl;
+                std::cout << " error s3d " << idx << " " << sigmas_3d_full.size() << " " << mvbBestInliers.size() << std::endl;
             }
             add_correspondence(mvP3Dw[idx].x, mvP3Dw[idx].y, mvP3Dw[idx].z, mvP2D[idx].x, mvP2D[idx].y, sigma2d,
                                sigma3d, S3D);
@@ -524,14 +474,6 @@ namespace ORB_SLAM2 {
         if (mode == 3)
         {
             compute_pose_dlsu(mBestTcw, mRi, mti, true);
-        }
-        if (mode == 4)
-        {
-            compute_pose_dlsu(mBestTcw, mRi, mti, false, false);
-        }
-        if (mode == 5)
-        {
-
         }
 
 //        std::cout << " after pose " << std::endl;
@@ -586,7 +528,6 @@ namespace ORB_SLAM2 {
         PMatrix P;
         P.block<3,3>(0,0) = R_est;
         P.block<3,1>(0,3) = t_est;
-        P = K*P;
         for (int i = 0; i < N_lines; i++)
         {
             Eigen::Vector3d Xs_c = K*(R_est*mvStartPts[i] + t_est);
@@ -598,8 +539,8 @@ namespace ORB_SLAM2 {
             l_h = l_h/l_h.segment<2>(0).norm();
             const Eigen::Vector2d& xs = mvLineEndpts2dStart[i];
             const Eigen::Vector2d& xe = mvLineEndpts2dEnd[i];
-            double errStartPoint = std::min((xs-xs_h.segment<2>(0)).norm(), (xs-xe_h.segment<2>(0)).norm());
-            double errEndPoint = std::min((xe-xe_h.segment<2>(0)).norm(), (xe-xs_h.segment<2>(0)).norm());
+//            double errStart = (xs-xs_h.segment<2>(0)).norm();
+//            double errEnd = (xe-xe_h.segment<2>(0)).norm();
             double errStart = l_h.dot(Eigen::Vector3d(xs(0), xs(1), 1.0));
             double errEnd = l_h.dot(Eigen::Vector3d(xe(0), xe(1), 1.0));
 //            Eigen::Vector3d l_det = Eigen::Vector3d(xs(0), xs(1), 1.0).cross(Eigen::Vector3d(xe(0), xe(1), 1.0));
@@ -612,26 +553,8 @@ namespace ORB_SLAM2 {
             Eigen::Vector3d eptStart3d, eptEnd3d;
             vgl::ReprojectEndpointTo3DProjMat(P, xs, mvLineX0s[i], mvLineDirs[i], &eptStart3d);
             vgl::ReprojectEndpointTo3DProjMat(P, xe, mvLineX0s[i], mvLineDirs[i], &eptEnd3d);
-//            std::cout << " -- -- -- " << std::endl;
-//            std::cout << eptStart3d << std::endl;
-//            std::cout << eptEnd3d << std::endl;
-//            Eigen::Vector3d dDet= eptEnd3d -eptStart3d;
-//            dDet.normalize();
-//            std::cout << dDet << std::endl;
-//            Eigen::Vector3d  dMod = mvEndPts[i]-mvStartPts[i];
-//            dMod.normalize();
-//            std::cout << dMod << std::endl;
-//            std::cout << " -- -- -- " << std::endl;
             double error2 = errStart*errStart + errEnd*errEnd;
-            double error2Point = errStartPoint*errStartPoint + errEndPoint*errEndPoint;
-            Eigen::Vector3d midPtDet = 0.5*(eptStart3d+eptEnd3d);
-            Eigen::Vector3d midPtMod = 0.5*(mvStartPts[i]+mvEndPts[i]);
-            double midPtDist = (midPtMod-midPtDet).norm();
-            double segLen = (eptEnd3d - eptStart3d).norm();
-//            std::cout << " line max err " << mvMaxLineError[i] << std::endl;
-            if (error2 < mvMaxLineError[i] && Xs_c(2)>0 && Xe_c(2)>0 && eptStart3d(2) > 0 && eptEnd3d(2) > 0
-            &&error2Point < 4*mvMaxLineError[i])
-            //&& eptStart3d(2) > 0 && eptEnd3d(2) > 0 && midPtDist < 0.5*segLen
+            if (error2 < mvMaxLineError[i] && eptStart3d(2) > 0 && eptEnd3d(2) > 0)
             {
                 mvbInliersLines[i] = true;
                 mnInliersLinesi++;
@@ -647,7 +570,6 @@ namespace ORB_SLAM2 {
              const vec2d& line_endpts_2d_start,
              const vec2d& line_endpts_2d_end,
             const mat6dvector& linesSigmas3D,
-             const mat6dvector& linesSigmas3DFull,
             const std::vector<Eigen::Matrix3d>& linesSigmasProj,
             const std::vector<Eigen::Matrix3d>& linesSigmasProjNorm,
             const std::vector<float>& linesDetSigmas2)
@@ -660,7 +582,6 @@ namespace ORB_SLAM2 {
         mvLineEndpts2dEnd = line_endpts_2d_end;
 //        mvLineEqs = linesProjEqs;
         mvSigmasLines3D = linesSigmas3D;
-        mvSigmasLines3DFull = linesSigmas3DFull;
         mvSigmasLines2D = linesSigmasProj;
         mvSigmasLines2DNorm = linesSigmasProjNorm;
         mvMaxLineError.resize(N_lines);
@@ -669,11 +590,9 @@ namespace ORB_SLAM2 {
         mvLineEqs.resize(N_lines);
         mvLineEqsNorm.resize(N_lines);
 
-        mvSigmasDetLines = linesDetSigmas2;
-
         for (int i = 0; i < N_lines; i++)
         {
-            mvMaxLineError[i] = linesDetSigmas2[i] * mTh2 * mTh2;// /4.0;
+            mvMaxLineError[i] = linesDetSigmas2[i] * mTh2 * mTh2 ;
 //            Eigen::Vector3d dLine = mvStartPts[i]-mvEndPts[i];
 //            mvLineDirs[i] = dLine/dLine.norm();
 //            mvLineX0s[i] = mvStartPts[i] - (mvLineDirs[i].dot(mvStartPts[i]))*mvLineDirs[i];
@@ -701,8 +620,8 @@ namespace ORB_SLAM2 {
         *J_proj_p = J_proj;
     }
 
-
     void PnPsolver::CheckInliers() {
+
         Eigen::Matrix3d R_est;
         for (int i = 0; i < 3; i++)
         {
@@ -713,8 +632,8 @@ namespace ORB_SLAM2 {
         }
         Eigen::Matrix2d F;
         F.setZero();
-        F(0, 0) = fu * fu;
-        F(1, 1) = fv * fv;
+        F(0, 0) = fu ;
+        F(1, 1) = fv ;
 
         mnInliersi = 0;
 
@@ -732,49 +651,37 @@ namespace ORB_SLAM2 {
             float distX = P2D.x - ue;
             float distY = P2D.y - ve;
 
-//            float error2 = distX * distX + distY * distY;
-//
-//            if (error2 < mvMaxError[i] && invZc > 0) {
-//                mvbInliersi[i] = true;
-//                mnInliersi++;
-//            } else {
-//                mvbInliersi[i] = false;
-//            }
-
             Eigen::Matrix2d SigmaProj;
             SigmaProj.setZero();
-
-            if (mode > 0 && mode < 4) {
-                Eigen::Matrix<double, 2, 3> J_proj;
-                GetJProj(Xc, Yc, 1.0/invZc, &J_proj);
-                SigmaProj = F * J_proj * R_est * sigmas_3d_full[i] * R_est.transpose() * J_proj.transpose();
-            }
-
+            bool is_cov_pnp = (mode > 0 && mode < 4);
             Eigen::Matrix2d SigmaDet = Eigen::Matrix2d::Identity() * mvSigma2[i];
-
             Eigen::Matrix2d SigmaFull = SigmaDet;
+            Eigen::Matrix<double, 2, 3> J_proj;
+            GetJProj(Xc, Yc, 1.0/invZc, &J_proj);
+            SigmaProj = F * J_proj * R_est * sigmas_3d_full[i] * R_est.transpose() * J_proj.transpose() * F;
 
-            if (is_u_ransac)
-            {
+            if (is_cov_pnp && is_u_ransac) {
                 SigmaFull = SigmaFull + SigmaProj;
+//                std::cout << sigmas_3d_full[i] << " " << SigmaProj << " " << mvSigma2[i] << std::endl;
+//                std::cout << " - " << std::endl;
             }
-
 
 //            if (SigmaProj.trace() > 100 * SigmaDet.trace())
-
-            if (SigmaProj.trace() > 40)
+            if (filter_bad_3d && is_cov_pnp && SigmaProj.trace() > 40)
             {
                 mvbInliersi[i] = false;
                 continue;
             }
+
             Eigen::Matrix2d S = SigmaFull.inverse();
 
             Eigen::Vector2d dP;
             dP(0) = distX;
             dP(1) = distY;
             float error2 = dP.transpose() * S * dP;
-//            std::cout << " err2 " << error2 << " sigma " << mvSigma2[i] << " mTh2 " << mTh2 << std::endl;
-            if (error2 < mTh2 && invZc > 0)
+            float error2_3d = dP.transpose() * SigmaProj.inverse() * dP;
+
+            if ((error2 < thrCoeff * mTh2)  && invZc > 0) // && (!is_cov_pnp || error2_3d < thrCoeff * mTh2)
             {
                 mvbInliersi[i] = true;
                 mnInliersi++;
@@ -782,6 +689,15 @@ namespace ORB_SLAM2 {
                 mvbInliersi[i] = false;
             }
 
+
+//            float error2 = distX * distX + distY * distY;
+
+//            if (error2 < mvMaxError[i] && invZc > 0) {
+//                mvbInliersi[i] = true;
+//                mnInliersi++;
+//            } else {
+//                mvbInliersi[i] = false;
+//            }
         }
     }
 
@@ -801,8 +717,6 @@ namespace ORB_SLAM2 {
         }
 
         sigmas2d_selected = std::vector<float>(maximum_number_of_correspondences, 0);
-
-        sigmas2D_selected = mat2dvector(maximum_number_of_correspondences, Eigen::Matrix2d::Identity());
 
         sigmas3d_selected = std::vector<float>(maximum_number_of_correspondences, 0);
 
@@ -827,8 +741,7 @@ namespace ORB_SLAM2 {
         Sigmas2dlinesN_selected = std::vector<Eigen::Matrix3d>(maximum_number_of_line_correspondences, Eigen::Matrix3d::Zero());
         Sigmas3dlines_selected = mat6dvector(maximum_number_of_line_correspondences,
                 Eigen::Matrix<double,6,6>::Identity());
-        Sigmas3dlines_full_selected = mat6dvector(maximum_number_of_line_correspondences,
-                                             Eigen::Matrix<double,6,6>::Identity());
+
         Xs_selected = std::vector<Eigen::Vector3d>(maximum_number_of_line_correspondences, Eigen::Vector3d::Zero());
         Xe_selected = std::vector<Eigen::Vector3d>(maximum_number_of_line_correspondences, Eigen::Vector3d::Zero());
         lineEqs_selected = std::vector<Eigen::Vector3d>(maximum_number_of_line_correspondences, Eigen::Vector3d::Zero());
@@ -848,6 +761,42 @@ namespace ORB_SLAM2 {
         number_of_line_correspondences = 0;
     }
 
+    void PnPsolver::finish_log()
+    {
+        if (is_debug_mode)
+        {
+            debug_output.close();
+            is_debug_opened = false;
+            output_initial_pose();
+        }
+    }
+
+
+    void PnPsolver::output_initial_pose()
+    {
+        if (is_debug_mode)
+        {
+            std::ofstream pose_out(debug_pose_path);
+            for (int ii = 0; ii < 4; ii++)
+            {
+                for (int jj = 0; jj < 4; jj++)
+                {
+                    pose_out << mBestTcw.at<float>(ii, jj) << " " ;
+                }
+            }
+            pose_out << std::endl;
+        }
+    }
+
+    void PnPsolver::open_log()
+    {
+        if (is_debug_mode)
+        {
+            debug_output = std::ofstream(debug_path);
+            is_debug_opened = true;
+        }
+    }
+
     void PnPsolver::add_correspondence(double X, double Y, double Z, double u, double v, const double s2d,
                                        const double s3d, const Eigen::Matrix3d& S3D) {
         pws[3 * number_of_correspondences] = X;
@@ -858,7 +807,6 @@ namespace ORB_SLAM2 {
         us[2 * number_of_correspondences + 1] = v;
 
         sigmas2d_selected[number_of_correspondences] = s2d;
-
         sigmas3d_selected[number_of_correspondences] = s3d;
         Sigmas3D_selected[number_of_correspondences] = S3D;
 
@@ -876,8 +824,6 @@ namespace ORB_SLAM2 {
             Sigmas3D_selected[number_of_correspondences] = c * Sigmas3D_selected[number_of_correspondences];
         }
 
-        sigmas2D_selected[number_of_correspondences] = Eigen::Matrix2d::Identity() * s2d;
-
         if (is_debug_opened)
         {
             debug_output << X << " " << Y << " " << Z << " " << u << " " << v << " " << s2d << " " << s3d << " ";
@@ -891,6 +837,7 @@ namespace ORB_SLAM2 {
             debug_output << std::endl;
         }
 
+
         number_of_correspondences++;
     }
 
@@ -902,7 +849,6 @@ namespace ORB_SLAM2 {
 
     void PnPsolver::add_line_correspondence(const Eigen::Matrix3d& S2d, const Eigen::Matrix3d& S2dN,
             const Eigen::Matrix<double,6,6>& S6D,
-            const Eigen::Matrix<double,6,6>& S6DFull,
             const Eigen::Vector3d& X_start, const Eigen::Vector3d& X_end,
             const Eigen::Vector3d& lineEq, const Eigen::Vector3d& lineEqN,
             const Eigen::Vector2d& xs, const Eigen::Vector2d& xe, float detSigma2,
@@ -919,7 +865,6 @@ namespace ORB_SLAM2 {
         Sigmas2dlines_selected[number_of_line_correspondences] = S2d;
         Sigmas2dlinesN_selected[number_of_line_correspondences] = S2dN;
         Sigmas3dlines_selected[number_of_line_correspondences] = S6D;
-        Sigmas3dlines_full_selected[number_of_line_correspondences] = S6DFull;
         Xs_selected[number_of_line_correspondences] = X_start;
         Xe_selected[number_of_line_correspondences] = X_end;
         lineEqs_selected[number_of_line_correspondences] = lineEq;
@@ -928,16 +873,7 @@ namespace ORB_SLAM2 {
         end_pts_2d_selected[number_of_line_correspondences] = xe;
         sigmasDetLineSelected[number_of_line_correspondences] = detSigma2;
         Sigmas_LD_selected[number_of_line_correspondences] = SigmaLD;
-
         number_of_line_correspondences++;
-
-//        std::cout << " added line corr spt " << start_pts_2d_selected [number_of_line_correspondences-1] << std::endl;
-//        std::cout << " ept " << end_pts_2d_selected [number_of_line_correspondences-1] << std::endl;
-//        std::cout << " leq " << lineEqs_selected[number_of_line_correspondences-1] << std::endl;
-//        std::cout << " Xs " << Xs_selected[number_of_line_correspondences-1] << std::endl;
-//        std::cout << " Xe " << Xe_selected[number_of_line_correspondences-1] << std::endl;
-//        std::cout << " --- " << std::endl;
-
     }
 
     void PnPsolver::choose_control_points(void) {
@@ -948,7 +884,7 @@ namespace ORB_SLAM2 {
                 cws[0][j] += pws[3 * i + j];
 
         if (bUseLines) {
-////            std::cout << " choosing cp using lines " << std::endl;
+//            std::cout << " choosing cp using lines " << std::endl;
             for (int i = 0; i < number_of_line_correspondences; i++) {
 //                std::cout << Xs_selected[i].transpose() << " " << Xe_selected[i].transpose() << std::endl;
                 for (int j = 0; j < 3; j++) {
@@ -987,6 +923,7 @@ namespace ORB_SLAM2 {
                     PW0->data.db[3*number_of_correspondences+3 * i + j] = Xs_selected[i](j) - cws[0][j];
                     PW0->data.db[3*(number_of_correspondences+number_of_line_correspondences) + 3 * i + j] = Xe_selected[i](j) - cws[0][j];
                 }
+
         }
 
         cvMulTransposed(PW0, &PW0tPW0, 1);
@@ -1410,9 +1347,18 @@ namespace ORB_SLAM2 {
                                      const Eigen::Matrix<double,6,6>&S6D, const Eigen::Matrix3d& K,
                                      const Eigen::Vector3d& Xs, const Eigen::Vector3d& Xe, float detSigma2)
     {
+//        Eigen::Matrix<double,6,6> S6D;
+//        S6D.setZero();
+//        S6D = S6D * S6D0.trace() * 1.0/6.0;
+//        Eigen::Matrix3d s2d;
+//        s2d.setIdentity();
+//        for (int i = 0; i < 3; i++)
+//        {
+//            s2d(i,i) = s2d0(i,i);
+//        }
         double * M1 = M->data.db + row * 12;
         double *M2 = M1 + 12;
-        Eigen::Vector3d lineEqUn = line_eq;
+        Eigen::Vector3d lineEqUn = K.transpose() * line_eq;
         for (int i = 0; i < 4; i++) {
             M1[3 * i] = as[i] * lineEqUn(0);
             M1[3 * i + 1] = as[i] * lineEqUn(1);
@@ -1423,31 +1369,51 @@ namespace ORB_SLAM2 {
             M2[3 * i + 2] = ae[i] * lineEqUn(2);
         }
 
-
         Eigen::Matrix2d Sigma2;
-        Sigma2(0,0) = lineEqUn.transpose() * K * R_est * S6D.block<3,3>(0,0) * R_est.transpose() * K.transpose() * lineEqUn;
-        Sigma2(0,1) = lineEqUn.transpose() * K * R_est * S6D.block<3,3>(0,3) * R_est.transpose() * K.transpose() * lineEqUn;
-        Sigma2(1,1) = lineEqUn.transpose() * K * R_est * S6D.block<3,3>(3,3) * R_est.transpose() * K.transpose() * lineEqUn;
-        Sigma2(1,0) = lineEqUn.transpose() * K * R_est * S6D.block<3,3>(3,0) * R_est.transpose() * K.transpose() * lineEqUn;
+        Sigma2(0,0) = lineEqUn.transpose() * R_est * S6D.block<3,3>(0,0) * R_est.transpose() * lineEqUn;
+        Sigma2(0,1) = lineEqUn.transpose() * R_est * S6D.block<3,3>(0,3) * R_est.transpose() * lineEqUn;
+        Sigma2(1,1) = lineEqUn.transpose() * R_est * S6D.block<3,3>(3,3) * R_est.transpose() * lineEqUn;
+        Sigma2(1,0) = lineEqUn.transpose() * R_est * S6D.block<3,3>(3,0) * R_est.transpose() * lineEqUn;
         Eigen::Matrix2d Sigma2_2d;
         Eigen::Vector3d Xsc = K*(R_est*Xs+t_est);
         Eigen::Vector3d Xec = K*(R_est*Xe+t_est);
 
+//        //test alphas and Xs
+//        std::vector<Eigen::Vector3d> ci;
+//        Eigen::Vector3d Xsc2;
+//        Xsc2.setZero();
+//        for (int j = 0; j < 4; j++)
+//        {
+//            Eigen::Vector3d cpt(cws[j][0], cws[j][1], cws[j][2]);
+//            ci.push_back(R_est*cpt + t_est);
+//            Xsc2 += ci[j]*as[j];
+//        }
+//        Xsc2 = K*Xsc2;
+//        std::cout << " test Xs " << (Xsc2-Xsc).norm() << std::endl;
 
 //        Sigma2_2d(0,0) = Xsc.transpose()*s2d*Xsc;
 //        Sigma2_2d(1,1) = Xec.transpose()*s2d*Xec;
 //        Sigma2_2d(0,1) = Xsc.transpose()*s2d*Xec;
 //        Sigma2_2d(1,0) = Xec.transpose()*s2d*Xsc;
-        Sigma2_2d = Eigen::Matrix2d::Identity() * detSigma2;
-        Sigma2_2d(0,0) = Sigma2_2d(0,0) * Xsc(2)*Xsc(2);
-        Sigma2_2d(1,1) = Sigma2_2d(1,1) * Xec(2)*Xec(2);
+//        Eigen::Vector2d n
+//        Sigma2_2d =
 
-        Sigma2 =  Sigma2_2d;// + Sigma2;
+
+//        std::cout << "from 3d: " << Sigma2 << std::endl;
+//        std::cout << "from 2d: " << Sigma2_2d << std::endl;
+        Sigma2_2d = Eigen::Matrix2d ::Identity();
+        Sigma2_2d(0,0) = Xsc(2)*Xsc(2);
+        Sigma2_2d(1,1) = Xec(2)*Xec(2);
+        Sigma2 =  Sigma2_2d * detSigma2 +Sigma2;
         Eigen::JacobiSVD<Eigen::Matrix2d> svd(Sigma2+(1e-6)*Eigen::Matrix2d::Identity(), Eigen::ComputeFullU | Eigen::ComputeFullV);
         Eigen::Vector2d svals = svd.singularValues();
         Eigen::Matrix2d S = Eigen::Matrix2d::Identity();
         S(0,0) = 1.0/sqrt(fabs(svals(0)));
         S(1,1) = 1.0/sqrt(fabs(svals(1)));
+//        S.setZero();
+//        S.setIdentity();
+//        S(0,0) = 1.0/Xsc(2)/Xsc(2);
+//        S(1,1) = 1.0/Xec(2)/Xec(2);
         Eigen::Matrix2d Sigma2dInv_sqrt = svd.matrixU() * S * svd.matrixU().transpose();
 
         Eigen::Map<Eigen::Matrix<double, 2, 12, Eigen::RowMajor> > M_pair(M1);
@@ -1584,10 +1550,6 @@ namespace ORB_SLAM2 {
         double * M1 = M->data.db + row * 12;
         double *M2 = M1 + 12;
         Eigen::Vector3d lineEqUn = K.transpose() * line_eq;
-//        std::cout << K << std::endl;
-//        lineEqUn = lineEqUn/lineEqUn.segment<2>(0).norm();
-//        std::cout << " filling line " << line_eq << " " << lineEqUn << std::endl;
-
         for (int i = 0; i < 4; i++) {
             M1[3 * i] = as[i] * lineEqUn(0);
             M1[3 * i + 1] = as[i] * lineEqUn(1);
@@ -1597,20 +1559,6 @@ namespace ORB_SLAM2 {
             M2[3 * i + 1] = ae[i] * lineEqUn(1);
             M2[3 * i + 2] = ae[i] * lineEqUn(2);
         }
-
-//        for (int i = 0; i < 4; i++) {
-//            std::cout << M1[3 * i] << " ";
-//            std::cout << M1[3 * i+1] << " ";
-//            std::cout << M1[3 * i+2] << " ";
-//        }/
-//
-//        std::cout << std::endl;
-//        for (int i = 0; i < 4; i++) {
-//            std::cout << M2[3 * i] << " ";
-//            std::cout << M2[3 * i+1] << " ";
-//            std::cout << M2[3 * i+2] << " ";
-//        }
-//        std::cout << " --- " << std::endl;
 
     }
 
@@ -1758,44 +1706,7 @@ namespace ORB_SLAM2 {
         }
     }
 
-    void PnPsolver::finish_log()
-    {
-        if (is_debug_mode)
-        {
-            debug_output.close();
-            is_debug_opened = false;
-            output_initial_pose();
-        }
-    }
-
-
-    void PnPsolver::output_initial_pose()
-    {
-        if (is_debug_mode)
-        {
-            std::ofstream pose_out(debug_pose_path);
-            for (int ii = 0; ii < 4; ii++)
-            {
-                for (int jj = 0; jj < 4; jj++)
-                {
-                    pose_out << mBestTcw.at<float>(ii, jj) << " " ;
-                }
-            }
-            pose_out << std::endl;
-        }
-    }
-
-    void PnPsolver::open_log()
-    {
-        if (is_debug_mode)
-        {
-            debug_output = std::ofstream(debug_path);
-            is_debug_opened = true;
-        }
-    }
-
     double PnPsolver::compute_pose(double R[3][3], double t[3]) {
-
         choose_control_points();
         compute_barycentric_coordinates();
 
@@ -1810,50 +1721,17 @@ namespace ORB_SLAM2 {
         for (int i = 0; i < number_of_correspondences; i++)
             fill_M(M, 2 * i, alphas + 4 * i, us[2 * i], us[2 * i + 1]);
 
-        if (bUseLines && number_of_line_correspondences>0)//
+        if (bUseLines)//
         {
             Eigen::Matrix3d K;
             K.setIdentity();
-            K(0, 0) = fu;
-            K(1, 1) = fv;
-            K(0, 2) = uc;
-            K(1, 2) = vc;
-            for (int i = 0; i < number_of_line_correspondences; i++) {
-//                std::cout << " added a line " << std::endl;
-                fill_M_line(M, 2 * (number_of_correspondences) + 2 * i, alphas_start + 4 * i, alphas_end + 4 * i,
-                            lineEqs_selected[i], K);
-            }
-
-
-//            std::cout << " full M" << std::endl;
-//            for (int ri = 0; ri < 2 * (number_of_correspondences + number_of_line_correspondences); ri++) {
-//                for (int ci = 0; ci < 12; ci++) {
-//                    double m_elem = ((double *) M->data.db)[ri * 12 + ci];
-//                    std::cout << m_elem << " ";
-//                    if (fabs(m_elem)>1e10)
-//                    {
-//                        int li = ri - 2*number_of_correspondences;
-//                        li = li/2;
-//                        std::cout << " caught error " << li << std::endl;
-//                        std::cout << " alphas start " << std::endl;
-//                        for (int i = 0; i < 4; i++)
-//                        {
-//                            std::cout << alphas_start[4*li+i] << " ";
-//                        }
-//                        std::cout << " alphas end " << std::endl;
-//                        for (int i = 0; i < 4; i++)
-//                        {
-//                            std::cout << alphas_end[4*li+i] << " ";
-//                        }
-//                        std::cout << " leq " << lineEqs_selected[li].transpose() << std::endl;
-//                        std::cout << " Xs " << Xs_selected[li].transpose() << std::endl;
-//                        std::cout << " Xe " << Xe_selected[li].transpose() << std::endl;
-//                        std::cout << " --- " << std::endl;
-//                    }
-//                }
-//                std::cout << std::endl;
-//            }
-//            std::cout << " done" << std::endl;
+            K(0,0) = fu;
+            K(1,1) = fv;
+            K(0,2) = uc;
+            K(1,2) = vc;
+            for (int i = 0; i < number_of_line_correspondences; i++)
+                fill_M_line(M, 2 * (number_of_correspondences)+2*i, alphas_start + 4 * i, alphas_end + 4*i,
+                        lineEqs_selected[i], K);
         }
 
         double mtm[12 * 12], d[12], ut[12 * 12];
@@ -2375,390 +2253,122 @@ namespace ORB_SLAM2 {
         q[3] *= scale;
     }
 
-    void PnPsolver::compute_pose_ml_pnp(const cv::Mat& T_est_cv, double R[3][3], double t[3])
+    int FindBestSolutionReproj(const std::vector<Eigen::Vector3d>& XX, const vec2d& xx,
+                               const Eigen::Matrix3d& K,
+                                     const posevector& poses, double* min_err_p)
     {
+        double min_err = 1e100;
+        int sol_ind = -1;
+        for (int i = 0; i < poses.size(); i++)
+        {
+            auto T = poses[i];
+            double err = 0;
+            double cnt = 0.0;
+            bool is_behind = false;
+            for (int j = 0; j < XX.size(); j++)
+            {
+                Eigen::Vector3d Xp = XX[j];
+                Eigen::Vector3d xc = K*(T.block<3,3>(0,0) * Xp + T.block<3,1>(0,3));
+                if (xc(2) < 0)
+                {
+                    is_behind = true;
+                }
+                xc = xc / xc(2);
+                err += (xc.segment<2>(0) - xx[j]).norm();
+                cnt += 1;
+            }
+            err = err/cnt;
+            if (err < min_err && !is_behind)
+            {
+                min_err = err;
+                sol_ind = i;
+            }
+        }
+        *min_err_p = min_err;
+        return sol_ind;
+    }
+
+    void PnPsolver::compute_pose_dlsu(const cv::Mat& T_est_cv, double R[3][3], double t[3], bool is_two_stage)
+    {
+//        void DLSU(const std::vector<Eigen::Vector3d>& XX, const vec2d& xx,
+//                  const std::vector<float>& sigmas3d,
+//                  const std::vector<float>& sigmas2d_norm,
+//                  const Eigen::Matrix3d& K, const Eigen::Matrix3d& R_est, const Eigen::Vector3d& t_est, posevector* sols_p);
         std::vector<Eigen::Vector3d> XX;
         vec2d xx;
         std::vector<float> sigmas2d_norm;
-        Eigen::Matrix3d K = Eigen::Matrix3d::Identity();
-        K(0, 0) = fu;
-        K(1, 1) = fv;
-        K(0, 2) = uc;
-        K(1, 2) = vc;
-
-        for (int i = 0; i < number_of_correspondences; i++) {
-            Eigen::Vector3d X(pws[3 * i], pws[3 * i + 1], pws[3 * i + 2]);
-            XX.push_back(X);
-
-            Eigen::Vector3d xh(us[2 * i], us[2 * i + 1], 1.0);
-            Eigen::Vector3d xn = K.inverse() * xh;
-            xx.push_back(xn.segment<2>(0));
-
-            sigmas2d_norm.push_back(sigmas2d_selected[i] / fu / fu);
-        }
-
-        posevector sols;
-
-        MLPnP(XX, xx, sigmas2d_norm, &sols);
-
-        Eigen::Matrix4d T_est;
-        cv::cv2eigen(T_est_cv, T_est);
-        sols.push_back(T_est);
-        sols.push_back(T_est);
-
-        double min_err;
-        int sol_ind = FindBestSolutionReproj(XX, xx, Eigen::Matrix3d::Identity(), sols, &min_err);
-
-        if (sol_ind>=0)
+        Eigen::Vector3d Xm;
+        Xm.setZero();
+        for (int i = 0; i < number_of_correspondences; i++)
         {
-            Eigen::Matrix4d T = sols[sol_ind];
-            for (int ri = 0; ri < 3; ri++)
-            {
-                for (int ci = 0; ci < 3; ci++) {
-                    mRi[ri][ci] = T(ri, ci);
-                }
-                mti[ri] = T(ri, 3);
-            }
+            Eigen::Vector3d X(pws[3*i], pws[3*i+1], pws[3*i+2]);
+            XX.push_back(X);
+            Xm = Xm + X;
+
+            Eigen::Vector2d x(us[2*i], us[2*i+1]);
+            xx.push_back(x);
+
+            sigmas2d_norm.push_back(sigmas2d_selected[i]/fu/fu);
         }
 
-    }
+        Xm = Xm / float(number_of_correspondences);
+        for (int i = 0; i < number_of_correspondences; i++)
+        {
+            XX[i] = XX[i] - Xm;
+        }
 
 
 
-//    void PnPsolver::compute_pose_dlsu(const cv::Mat& T_est_cv, double R[3][3], double t[3], bool is_two_stage,
-//            bool is_unc)
-//    {
-////        void DLSU(const std::vector<Eigen::Vector3d>& XX, const vec2d& xx,
-////                  const std::vector<float>& sigmas3d,
-////                  const std::vector<float>& sigmas2d_norm,
-////                  const Eigen::Matrix3d& K, const Eigen::Matrix3d& R_est, const Eigen::Vector3d& t_est, posevector* sols_p);
-//        std::vector<Eigen::Vector3d> XX;
-//        vec2d xx;
-//        std::vector<float> sigmas2d_norm;
-//        for (int i = 0; i < number_of_correspondences; i++)
-//        {
-//            Eigen::Vector3d X(pws[3*i], pws[3*i+1], pws[3*i+2]);
-//            XX.push_back(X);
-//
-//            Eigen::Vector2d x(us[2*i], us[2*i+1]);
-//            xx.push_back(x);
-//
-//            sigmas2d_norm.push_back(sigmas2d_selected[i]/fu/fu);
-//        }
-//
-//
-//
-//        Eigen::Matrix3d K = Eigen::Matrix3d::Identity();
-//        K(0,0) = fu;
-//        K(1,1) = fv;
-//        K(0,2) = uc;
-//        K(1,2) = vc;
-//        Eigen::Matrix4d T_est;
-//        cv::cv2eigen(T_est_cv, T_est);
-//        posevector sols;
-//
-//        mat6dvector Sigmas3DLinesBalls;
-//        std::vector<Eigen::Matrix3d> Sigmas2DLinesBalls;
-//
-//        if (bUseLines)
-//        {
-//
-//            for (int i = 0; i < Xs_selected.size(); i++)
-//            {
-//                Eigen::Matrix<double,6,6> S6D;
-//                Eigen::Matrix<double,6,6> SRec = Sigmas3dlines_selected[i];
-//                if (is_two_stage)
-//                {
-//                    SRec = Sigmas3dlines_full_selected[i];
-//                }
-//                S6D.setIdentity();
-//                S6D.block<3,3>(0,0) = S6D.block<3,3>(0,0) * SRec.block<3,3>(0,0).trace() * 1.0/3.0;
-//                S6D.block<3,3>(0,3) = Eigen::Matrix3d::Identity() * SRec.block<3,3>(0,3).trace() * 1.0/3.0;
-//                S6D.block<3,3>(3,0) = Eigen::Matrix3d::Identity() * SRec.block<3,3>(3,0).trace() * 1.0/3.0;
-//                S6D.block<3,3>(3,3) = S6D.block<3,3>(3,3) * SRec.block<3,3>(3,3).trace() * 1.0/3.0;
-//                Eigen::Matrix3d s2d;
-//                s2d.setIdentity();
-//                s2d = s2d * sigmasDetLineSelected[i]/K(0,0)/K(0,0);
-////                for (int j = 0; j < 3; j++)
-////                {
-////                    s2d(j,j) = Sigmas2dlinesN_selected[i](j,j);
-////                }
-//                Sigmas3DLinesBalls.push_back(S6D);
-//                Sigmas2DLinesBalls.push_back(s2d);
-//            }
-//
-//            if (is_unc) {
-//                DLSULines(XX, xx, Xs_selected, Xe_selected, lineEqsN_selected, sigmas3d_selected, sigmas2d_norm,
-//                          Sigmas3DLinesBalls, Sigmas2dlinesN_selected,
-//                          sigmasDetLineSelected,
-//                          K, T_est.block<3, 3>(0, 0), T_est.block<3, 1>(0, 3), &sols);
-//            } else {
-//                DLSLines(XX, xx, Xs_selected, Xe_selected, lineEqsN_selected,
-//                          K, T_est.block<3, 3>(0, 0), T_est.block<3, 1>(0, 3), &sols);
-//            }
-//        } else {
-//            if (is_unc) {
-//                DLSU(XX, xx, sigmas3d_selected, sigmas2d_norm, K, T_est.block<3, 3>(0, 0), T_est.block<3, 1>(0, 3),
-//                     &sols);
-//            } else {
-//                DLSLines(XX, xx, std::vector<Eigen::Vector3d>(), std::vector<Eigen::Vector3d>(), std::vector<Eigen::Vector3d>(),
-//                         K, T_est.block<3, 3>(0, 0), T_est.block<3, 1>(0, 3), &sols);
-//            }
-//        }
-//
-////        sols.clear();
-//        if (sols.size() == 0)
-//        {
-////            std::cout << " cycle start " << std::endl;
-//            int cnt = 0;
-//            while (cnt < 5 && sols.size() == 0) {
-//                cv::Mat rvec(3, 1, CV_64FC1);
-//                cv::theRNG().fill(rvec, cv::RNG::NORMAL, 0, 6.28);
-//                cv::Mat Rr;
-//                cv::Rodrigues(rvec, Rr);
-//                Eigen::Matrix3d Rr_eig;
-//                cv::cv2eigen(Rr, Rr_eig);
-////                std::cout << " random rot " << Rr_eig << std::endl;
-//                std::vector<Eigen::Vector3d> XXr(XX.size());
-//
-//                mat6dvector Sigmas3dlines_selected_rot, Sigmas3DLinesBalls_rot;
-//                for (int i = 0; i < XX.size(); i++) {
-//                    XXr[i] = Rr_eig * XX[i];
-//                }
-//                std::vector<Eigen::Vector3d> Xsr(Xs_selected.size());
-//                std::vector<Eigen::Vector3d> Xer(Xs_selected.size());
-//                if (bUseLines)
-//                {
-//                    for (int i = 0; i < Xs_selected.size(); i++)
-//                    {
-//                        Xsr.push_back(Rr_eig * Xs_selected[i]);
-//                        Xer.push_back(Rr_eig * Xe_selected[i]);
-//                        Eigen::Matrix<double,6,6> SRot;
-//                        Eigen::Matrix<double,6,6> SRotBall;
-//                        for (int ri = 0; ri < 2; ri++)
-//                        {
-//                            for (int ci = 0; ci < 2; ci++)
-//                            {
-//                                SRot.block<3,3>(3*ri,3*ci) = Rr_eig * Sigmas3dlines_selected[i].block<3,3>(3*ri,3*ci) * Rr_eig.transpose();
-//                                SRotBall.block<3,3>(3*ri,3*ci) = Rr_eig * Sigmas3DLinesBalls[i].block<3,3>(3*ri,3*ci) * Rr_eig.transpose();
-//                            }
-//                        }
-//
-//                        Sigmas3dlines_selected_rot.push_back(SRot);
-//                        Sigmas3DLinesBalls_rot.push_back(SRotBall);
-//                    }
-//                }
-//                Eigen::Matrix3d Rr_est = T_est.block<3, 3>(0, 0) * Rr_eig.transpose();
-//                if (bUseLines) {
-//                    if (is_unc) {
-//                        DLSULines(XXr, xx, Xsr, Xer, lineEqsN_selected, sigmas3d_selected, sigmas2d_norm,
-//                                  Sigmas3DLinesBalls_rot, Sigmas2dlinesN_selected,
-//                                  sigmasDetLineSelected,
-//                                  K, Rr_est, T_est.block<3, 1>(0, 3), &sols);
-//                    } else {
-//                        DLSLines(XXr, xx, Xsr, Xer, lineEqsN_selected,
-//                                  K, Rr_est, T_est.block<3, 1>(0, 3), &sols);
-//                    }
-//                } else {
-//                    if (is_unc) {
-//                        DLSU(XXr, xx, sigmas3d_selected, sigmas2d_norm, K, Rr_est, T_est.block<3, 1>(0, 3), &sols);
-//                    } else {
-//                        DLSLines(XXr, xx, std::vector<Eigen::Vector3d>(), std::vector<Eigen::Vector3d>(),
-//                                 std::vector<Eigen::Vector3d>(),
-//                                 K, Rr_est, T_est.block<3, 1>(0, 3), &sols);
-//                    }
-//                }
-//                if (sols.size()>0)
-//                {
-//                    for (int i = 0; i < sols.size(); i++)
-//                    {
-//                        sols[i].block<3,3>(0,0) = sols[i].block<3,3>(0,0) * Rr_eig;
-//                    }
-//                }
-//                cnt++;
-//            }
-//        }
-//
-//        if (is_two_stage)
-//        {
-//            if (sols.size()>0)
-//            {
-//                Eigen::Matrix4d T_est = sols[0];
-//                posevector sols_fine;
-//
-//                if (bUseLines)
-//                {
-//                    DLSULines_accurate(XX, xx, Xs_selected, Xe_selected, lineEqsN_selected, Sigmas3D_selected, sigmas2d_selected,
-//                                       Sigmas3dlines_full_selected, Sigmas2dlinesN_selected,
-//                                       sigmasDetLineSelected,
-//                                       K, T_est.block<3, 3>(0, 0),T_est.block<3, 1>(0, 3), &sols_fine);
-//
-//                } else {
-//                    DLSU_accurate(XX, xx, Sigmas3D_selected, sigmas2d_selected, K, T_est.block<3, 3>(0, 0),
-//                                  T_est.block<3, 1>(0, 3), &sols_fine);
-//                }
-//                for (int i = 0; i < sols_fine.size(); i++)
-//                {
-//                    sols.push_back(sols_fine[i]);
-//                }
-//            }
-//        }
-//
-//        sols.push_back(T_est);
-//
-//        double min_err;
-//        int sol_ind = FindBestSolutionReproj(XX, xx, K, sols, &min_err);
-//
-//        if (sol_ind>=0)
-//        {
-//            Eigen::Matrix4d T = sols[sol_ind];
-//            for (int ri = 0; ri < 3; ri++)
-//            {
-//                for (int ci = 0; ci < 3; ci++) {
-//                    mRi[ri][ci] = T(ri, ci);
-//                }
-//                mti[ri] = T(ri, 3);
-//            }
-//        }
-//    }
-
-    void PnPsolver::compute_pose_dlsu(const cv::Mat& T_est_cv, double R[3][3], double t[3], bool is_two_stage,
-                                       bool is_unc)
-    {
-        bool is_log = false;
-
-        std::vector<Eigen::Vector3d> XX;
-        vec2d xx_n;
         Eigen::Matrix3d K = Eigen::Matrix3d::Identity();
         K(0,0) = fu;
         K(1,1) = fv;
         K(0,2) = uc;
         K(1,2) = vc;
-        std::vector<float> sigmas2d_norm, sigmas3d_norm;
-        std::vector<Eigen::Matrix3d> Sigmas3D;
-        for (int i = 0; i < number_of_correspondences; i++)
-        {
-            Eigen::Vector3d X(pws[3*i], pws[3*i+1], pws[3*i+2]);
-            XX.push_back(X);
-            Eigen::Vector2d x(us[2*i], us[2*i+1]);
-            Eigen::Vector3d x_h;
-            x_h(2) = 1.0;
-            x_h.segment<2>(0) = x;
-            Eigen::Vector3d x_h_n = K.inverse() * x_h;
-            xx_n.push_back(x_h_n.segment<2>(0));
-            sigmas2d_norm.push_back(sigmas2D_selected[i].trace() * 0.5 / fu / fu);
-            sigmas3d_norm.push_back(Sigmas3D_selected[i].trace() * 0.333);
-            Sigmas3D.push_back(Sigmas3D_selected[i]);
-        }
-
-        std::vector<Eigen::Vector3d> leqs_n;
-        std::vector<Eigen::Vector3d> Xs, Xe;
-        std::vector<float> sigmasDetLines_n;
-        mat6dvector Sigmas_3DL;
-        std::vector<Eigen::Matrix3d> Sigmas_2DL;
-        for (int i = 0; i < number_of_line_correspondences; i++)
-        {
-            Eigen::Vector3d leq;
-            vgl::NormalizedLineEquation(start_pts_2d_selected[i](0), start_pts_2d_selected[i](1),
-                                        end_pts_2d_selected[i](0), end_pts_2d_selected[i](1), K, &leq);
-            leqs_n.push_back(leq);
-            sigmasDetLines_n.push_back(sigmasDetLineSelected[i] / fu / fu);
-            Xs.push_back(Xs_selected[i]);
-            Xe.push_back(Xe_selected[i]);
-            Sigmas_3DL.push_back(Sigmas3dlines_selected[i]);
-            Sigmas_2DL.push_back(Sigmas2dlines_selected[i]);
-        }
-
-        mat6dvector Sigmas3DLinesBalls;
-        for (int i = 0; i < number_of_line_correspondences; i++)
-        {
-            Eigen::Matrix<double,6,6> S6D;
-            Eigen::Matrix<double,6,6> SRec = Sigmas3dlines_selected[i];
-            if (is_two_stage)
-            {
-                SRec = Sigmas3dlines_selected[i];
-            }
-            S6D.setIdentity();
-            S6D.block<3,3>(0,0) = S6D.block<3,3>(0,0) * SRec.block<3,3>(0,0).trace() * 1.0/3.0;
-            S6D.block<3,3>(0,3) = Eigen::Matrix3d::Identity() * SRec.block<3,3>(0,3).trace() * 1.0/3.0;
-            S6D.block<3,3>(3,0) = Eigen::Matrix3d::Identity() * SRec.block<3,3>(3,0).trace() * 1.0/3.0;
-            S6D.block<3,3>(3,3) = S6D.block<3,3>(3,3) * SRec.block<3,3>(3,3).trace() * 1.0/3.0;
-//            Eigen::Matrix3d s2d;
-//                s2d.setIdentity();
-//                s2d = s2d * sigmas2dlines_selected[i] / fu / fu;
-//                for (int j = 0; j < 3; j++)
-//                {
-//                    s2d(j,j) = Sigmas2dlinesN_selected[i](j,j);
-//                }
-            Sigmas3DLinesBalls.push_back(S6D);
-//                Sigmas2DLinesBalls.push_back(s2d);
-
-//            sigmasDetLines_n.push_back(sigmasDetLinesSelected[i] / fu / fv);
-        }
-
         Eigen::Matrix4d T_est;
         cv::cv2eigen(T_est_cv, T_est);
         posevector sols;
 
-        if (!bUseLines) {
-            if (is_unc) {
+        mat6dvector Sigmas3DLinesBalls;
+        std::vector<Eigen::Matrix3d> Sigmas2DLinesBalls;
 
-                if (is_log)
-                {
-                    std::string deb_path = "/home/alexander/materials/pnp3d/debug_ransac/dlsu/";
-                    std::ofstream poses_out(deb_path + "/pose.txt");
-                    for (int ii = 0; ii < 4; ii++)
-                    {
-                        for (int jj = 0; jj < 4; jj++)
-                        {
-                            poses_out << T_est(ii, jj) << " ";
-                        }
-                    }
-                    std::ofstream data_out(deb_path + "/data.txt");
-                    for (int ii = 0; ii < XX.size(); ii++)
-                    {
-                        data_out << XX[ii](0) << " " << XX[ii](1) << " " << XX[ii](2) << " ";
-                        data_out << xx_n[ii](0) << " " << xx_n[ii](1) << " ";
-                        data_out << sigmas3d_norm[ii] << " " << sigmas2d_norm[ii] << std::endl;
-                    }
-                }
+        if (bUseLines)
+        {
 
-                DLSU(XX, xx_n, sigmas3d_norm, sigmas2d_norm, T_est.block<3, 3>(0, 0), T_est.block<3, 1>(0, 3), &sols);
-
-                if (is_log)
-                {
-                    std::cout << " dlsu found " << sols.size() << " solutions" << std::endl;
-                }
-            } else {
-                DLSLines(XX, xx_n, std::vector<Eigen::Vector3d>(), std::vector<Eigen::Vector3d>(),
-                         std::vector<Eigen::Vector3d>(),
-                         T_est.block<3, 3>(0, 0), T_est.block<3, 1>(0, 3), &sols);
-            }
-        } else {
-            if (is_unc)
+            for (size_t i = 0; i < Xs_selected.size(); i++)
             {
-                DLSULines(XX, xx_n, Xs, Xe,
-                         leqs_n, sigmas3d_norm, sigmas2d_norm, Sigmas3DLinesBalls, sigmasDetLines_n,
-                         T_est.block<3, 3>(0, 0), T_est.block<3, 1>(0, 3), &sols);
-            } else {
-                DLSLines(XX, xx_n, Xs, Xe,
-                         leqs_n,
-                         T_est.block<3, 3>(0, 0), T_est.block<3, 1>(0, 3), &sols);
+                Eigen::Matrix<double,6,6> S6D;
+                S6D.setIdentity();
+                S6D = S6D * Sigmas3dlines_selected[i].trace() * 1.0/6.0;
+                Eigen::Matrix3d s2d;
+                s2d.setIdentity();
+                for (int j = 0; j < 3; j++)
+                {
+                    s2d(j,j) = Sigmas2dlinesN_selected[i](j,j);
+                }
+                Sigmas3DLinesBalls.push_back(S6D);
+                Sigmas2DLinesBalls.push_back(s2d);
             }
+//            void DLSULines(const std::vector<Eigen::Vector3d>& XX, const vec2d& xx,
+//                           const std::vector<Eigen::Vector3d>& XXs, const std::vector<Eigen::Vector3d>& XXe,
+//                           const std::vector<Eigen::Vector3d>& l2ds,
+//                           const std::vector<float>& sigmas3d,
+//                           const std::vector<float>& sigmas2d_norm,
+//                           const mat6dvector& sigmas3d_lines,
+//                           const std::vector<Eigen::Matrix3d>& sigmas2d_lines,
+//                           const Eigen::Matrix3d& K, const Eigen::Matrix3d& R_est, const Eigen::Vector3d& t_est, posevector* sols_p);
+
+            DLSULines(XX, xx, Xs_selected, Xe_selected, lineEqsN_selected, sigmas3d_selected, sigmas2d_norm,
+                      Sigmas3dlines_selected, Sigmas2dlinesN_selected,
+                      sigmasDetLineSelected,
+                      K, T_est.block<3,3>(0,0), T_est.block<3,1>(0,3), &sols);
+        } else {
+            DLSU(XX, xx, sigmas3d_selected, sigmas2d_norm, K, T_est.block<3,3>(0,0), T_est.block<3,1>(0,3), &sols);
         }
 
-
-//        if (is_unc) {
-//            DLSULines(XX, xx_n, Xs_selected, Xe_selected, leqs_n, sigmas3d_norm, sigmas2d_norm,
-//                      Sigmas3DLinesBalls, sigmasDetLines_n,
-//                      T_est.block<3, 3>(0, 0), T_est.block<3, 1>(0, 3), &sols);
-//        } else {
-//            DLSLines(XX, xx_n, Xs_selected, Xe_selected, leqs_n,
-//                     T_est.block<3, 3>(0, 0), T_est.block<3, 1>(0, 3), &sols);
-//        }
-
+//        sols.clear();
         if (sols.size() == 0)
         {
+//            std::cout << " cycle start " << std::endl;
             int cnt = 0;
             while (cnt < 5 && sols.size() == 0) {
                 cv::Mat rvec(3, 1, CV_64FC1);
@@ -2770,52 +2380,38 @@ namespace ORB_SLAM2 {
 //                std::cout << " random rot " << Rr_eig << std::endl;
                 std::vector<Eigen::Vector3d> XXr(XX.size());
 
-                mat6dvector Sigmas3dlines_selected_rot, Sigmas3DLinesBalls_rot;
+                mat6dvector Sigmas3dlines_selected_rot;
                 for (int i = 0; i < XX.size(); i++) {
                     XXr[i] = Rr_eig * XX[i];
                 }
-                std::vector<Eigen::Vector3d> Xsr(Xs.size());
-                std::vector<Eigen::Vector3d> Xer(Xs.size());
+                std::vector<Eigen::Vector3d> Xsr(Xs_selected.size());
+                std::vector<Eigen::Vector3d> Xer(Xs_selected.size());
                 if (bUseLines)
                 {
-                    for (int i = 0; i < Xs.size(); i++)
+                    for (int i = 0; i < Xs_selected.size(); i++)
                     {
-                        Xsr.push_back(Rr_eig * Xs[i]);
-                        Xer.push_back(Rr_eig * Xe[i]);
+                        Xsr.push_back(Rr_eig * Xs_selected[i]);
+                        Xer.push_back(Rr_eig * Xe_selected[i]);
                         Eigen::Matrix<double,6,6> SRot;
-                        Eigen::Matrix<double,6,6> SRotBall;
                         for (int ri = 0; ri < 2; ri++)
                         {
                             for (int ci = 0; ci < 2; ci++)
                             {
                                 SRot.block<3,3>(3*ri,3*ci) = Rr_eig * Sigmas3dlines_selected[i].block<3,3>(3*ri,3*ci) * Rr_eig.transpose();
-                                SRotBall.block<3,3>(3*ri,3*ci) = Rr_eig * Sigmas3DLinesBalls[i].block<3,3>(3*ri,3*ci) * Rr_eig.transpose();
                             }
                         }
 
                         Sigmas3dlines_selected_rot.push_back(SRot);
-                        Sigmas3DLinesBalls_rot.push_back(SRotBall);
                     }
                 }
                 Eigen::Matrix3d Rr_est = T_est.block<3, 3>(0, 0) * Rr_eig.transpose();
                 if (bUseLines) {
-                    if (is_unc) {
-                        DLSULines(XXr, xx_n, Xsr, Xer, leqs_n, sigmas3d_norm, sigmas2d_norm,
-                                  Sigmas3DLinesBalls_rot,
-                                  sigmasDetLines_n,
-                                  Rr_est, T_est.block<3, 1>(0, 3), &sols);
-                    } else {
-                        DLSLines(XXr, xx_n, Xsr, Xer, leqs_n,
-                                 Rr_est, T_est.block<3, 1>(0, 3), &sols);
-                    }
+                    DLSULines(XXr, xx, Xsr, Xer, lineEqsN_selected, sigmas3d_selected, sigmas2d_norm,
+                              Sigmas3dlines_selected_rot, Sigmas2dlinesN_selected,
+                              sigmasDetLineSelected,
+                              K, Rr_est, T_est.block<3,1>(0,3), &sols);
                 } else {
-                    if (is_unc) {
-                        DLSU(XXr, xx_n, sigmas3d_norm, sigmas2d_norm, Rr_est, T_est.block<3, 1>(0, 3), &sols);
-                    } else {
-                        DLSLines(XXr, xx_n, std::vector<Eigen::Vector3d>(), std::vector<Eigen::Vector3d>(),
-                                 std::vector<Eigen::Vector3d>(),
-                                 Rr_est, T_est.block<3, 1>(0, 3), &sols);
-                    }
+                    DLSU(XXr, xx, sigmas3d_selected, sigmas2d_norm, K, Rr_est, T_est.block<3, 1>(0, 3), &sols);
                 }
                 if (sols.size()>0)
                 {
@@ -2828,11 +2424,6 @@ namespace ORB_SLAM2 {
             }
         }
 
-        if (is_log)
-        {
-            std::cout << " finally, " << sols.size() << " solutions " << std::endl;
-        }
-
         if (is_two_stage)
         {
             if (sols.size()>0)
@@ -2842,12 +2433,13 @@ namespace ORB_SLAM2 {
 
                 if (bUseLines)
                 {
-                    DLSULines_accurate(XX, xx_n, Xs, Xe, leqs_n, Sigmas3D, sigmas2d_norm,
-                                       Sigmas_3DL, Sigmas_2DL,
-                                       T_est.block<3, 3>(0, 0),T_est.block<3, 1>(0, 3), &sols_fine);
+                    DLSULines_accurate(XX, xx, Xs_selected, Xe_selected, lineEqsN_selected, Sigmas3D_selected, sigmas2d_selected,
+                                       Sigmas3dlines_selected, Sigmas2dlinesN_selected,
+                                       sigmasDetLineSelected,
+                                       K, T_est.block<3, 3>(0, 0),T_est.block<3, 1>(0, 3), &sols_fine);
 
                 } else {
-                    DLSU_accurate(XX, xx_n, Sigmas3D, sigmas2d_norm, T_est.block<3, 3>(0, 0),
+                    DLSU_accurate(XX, xx, Sigmas3D_selected, sigmas2d_selected, K, T_est.block<3, 3>(0, 0),
                                   T_est.block<3, 1>(0, 3), &sols_fine);
                 }
                 for (int i = 0; i < sols_fine.size(); i++)
@@ -2860,7 +2452,54 @@ namespace ORB_SLAM2 {
         sols.push_back(T_est);
 
         double min_err;
-        int sol_ind = FindBestSolutionReproj(XX, xx_n, Eigen::Matrix3d::Identity(), sols, &min_err);
+        int sol_ind = FindBestSolutionReproj(XX, xx, K, sols, &min_err);
+
+        if (sol_ind>=0)
+        {
+            Eigen::Matrix4d T = sols[sol_ind];
+            Eigen::Vector3d shift_rot = T.block<3,3>(0,0) * Xm;
+            for (int ri = 0; ri < 3; ri++)
+            {
+                for (int ci = 0; ci < 3; ci++) {
+                    mRi[ri][ci] = T(ri, ci);
+                }
+                mti[ri] = T(ri, 3) - shift_rot(ri);
+            }
+        }
+    }
+
+    void PnPsolver::compute_pose_dlsu_accurate(const cv::Mat& T_est_cv, double R[3][3], double t[3])
+    {
+//        void DLSU(const std::vector<Eigen::Vector3d>& XX, const vec2d& xx,
+//                  const std::vector<float>& sigmas3d,
+//                  const std::vector<float>& sigmas2d_norm,
+//                  const Eigen::Matrix3d& K, const Eigen::Matrix3d& R_est, const Eigen::Vector3d& t_est, posevector* sols_p);
+        std::vector<Eigen::Vector3d> XX;
+        vec2d xx;
+        std::vector<float> sigmas2d_norm;
+        for (int i = 0; i < number_of_correspondences; i++)
+        {
+            Eigen::Vector3d X(pws[3*i], pws[3*i+1], pws[3*i+2]);
+            XX.push_back(X);
+
+            Eigen::Vector2d x(us[2*i], us[2*i+1]);
+            xx.push_back(x);
+
+            sigmas2d_norm.push_back(sigmas2d_selected[i]/fu/fu);
+        }
+
+        Eigen::Matrix3d K = Eigen::Matrix3d::Identity();
+        K(0,0) = fu;
+        K(1,1) = fv;
+        K(0,2) = uc;
+        K(1,2) = vc;
+        Eigen::Matrix4d T_est;
+        cv::cv2eigen(T_est_cv, T_est);
+        posevector sols;
+        DLSU_accurate(XX, xx, Sigmas3D_selected, sigmas2d_norm, K, T_est.block<3,3>(0,0), T_est.block<3,1>(0,3), &sols);
+
+        double min_err;
+        int sol_ind = FindBestSolutionReproj(XX, xx, K, sols, &min_err);
 
         if (sol_ind>=0)
         {
@@ -2874,52 +2513,6 @@ namespace ORB_SLAM2 {
             }
         }
     }
-
-//    void PnPsolver::compute_pose_dlsu_accurate(const cv::Mat& T_est_cv, double R[3][3], double t[3])
-//    {
-////        void DLSU(const std::vector<Eigen::Vector3d>& XX, const vec2d& xx,
-////                  const std::vector<float>& sigmas3d,
-////                  const std::vector<float>& sigmas2d_norm,
-////                  const Eigen::Matrix3d& K, const Eigen::Matrix3d& R_est, const Eigen::Vector3d& t_est, posevector* sols_p);
-//        std::vector<Eigen::Vector3d> XX;
-//        vec2d xx;
-//        std::vector<float> sigmas2d_norm;
-//        for (int i = 0; i < number_of_correspondences; i++)
-//        {
-//            Eigen::Vector3d X(pws[3*i], pws[3*i+1], pws[3*i+2]);
-//            XX.push_back(X);
-//
-//            Eigen::Vector2d x(us[2*i], us[2*i+1]);
-//            xx.push_back(x);
-//
-//            sigmas2d_norm.push_back(sigmas2d_selected[i]/fu/fu);
-//        }
-//
-//        Eigen::Matrix3d K = Eigen::Matrix3d::Identity();
-//        K(0,0) = fu;
-//        K(1,1) = fv;
-//        K(0,2) = uc;
-//        K(1,2) = vc;
-//        Eigen::Matrix4d T_est;
-//        cv::cv2eigen(T_est_cv, T_est);
-//        posevector sols;
-//        DLSU_accurate(XX, xx, Sigmas3D_selected, sigmas2d_norm, K, T_est.block<3,3>(0,0), T_est.block<3,1>(0,3), &sols);
-//
-//        double min_err;
-//        int sol_ind = FindBestSolutionReproj(XX, xx, K, sols, &min_err);
-//
-//        if (sol_ind>=0)
-//        {
-//            Eigen::Matrix4d T = sols[sol_ind];
-//            for (int ri = 0; ri < 3; ri++)
-//            {
-//                for (int ci = 0; ci < 3; ci++) {
-//                    mRi[ri][ci] = T(ri, ci);
-//                }
-//                mti[ri] = T(ri, 3);
-//            }
-//        }
-//    }
 
 
     double PnPsolver::compute_pose_uncertain(const cv::Mat& T_est_cv, double R[3][3], double t[3]) {
@@ -2935,12 +2528,11 @@ namespace ORB_SLAM2 {
             M = cvCreateMat(2 * number_of_correspondences, 12, CV_64F);
         }
 
-        for (int i = 0; i < number_of_correspondences; i++) {
+        for (int i = 0; i < number_of_correspondences; i++)
             fill_M_uncertain(T_est_cv, M, 2 * i, alphas + 4 * i, us[2 * i], us[2 * i + 1], sigmas2d_selected[i],
                              sigmas3d_selected[i], pws + 3 * i);
-        }
-        if (bUseLines && number_of_line_correspondences>0)
-        {//bUseLines
+
+        if (bUseLines) {//bUseLines
             Eigen::Matrix4d T_est;
             cv::cv2eigen(T_est_cv, T_est);
             Eigen::Matrix3d R_est = T_est.block<3,3>(0,0);
@@ -2952,29 +2544,28 @@ namespace ORB_SLAM2 {
             K(0,2) = uc;
             K(1,2) = vc;
             for (int i = 0; i < number_of_line_correspondences; i++) {
-                mat6dvector Sigmas3DLinesBalls;
-                std::vector<Eigen::Matrix3d> Sigmas2DLinesBalls;
-
-                Eigen::Matrix<double,6,6> S6D;
-                Eigen::Matrix<double,6,6> SRec = Sigmas3dlines_selected[i];
-                S6D.setIdentity();
-                S6D.block<3,3>(0,0) = S6D.block<3,3>(0,0) * SRec.block<3,3>(0,0).trace() * 1.0/3.0;
-                S6D.block<3,3>(0,3) = Eigen::Matrix3d::Identity() * SRec.block<3,3>(0,3).trace() * 1.0/3.0;
-                S6D.block<3,3>(3,0) = Eigen::Matrix3d::Identity() * SRec.block<3,3>(3,0).trace() * 1.0/3.0;
-                S6D.block<3,3>(3,3) = S6D.block<3,3>(3,3) * SRec.block<3,3>(3,3).trace() * 1.0/3.0;
-                Eigen::Matrix3d s2d;
-                s2d.setIdentity();
-                s2d = s2d * sigmasDetLineSelected[i]/K(0,0)/K(0,0);
+//                fill_M_uncertain_line_simple(R_est, t_est, M,
+//                                       2*number_of_correspondences+i, alphas_start + 4*i, alphas_end + 4*i,
+//                                       lineEqs_selected[i], Sigmas2dlines_selected[i],
+//                                       Sigmas_LD_selected[i],
+//                                       K,
+//                                       Xs_selected[i], Xe_selected[i],
+//                                      sigmasDetLineSelected[i]);
                 fill_M_uncertain_line(R_est, t_est, M,
-                                      2 * (number_of_correspondences + i), alphas_start + 4 * i, alphas_end + 4 * i,
-                                      lineEqs_selected[i], s2d,
-                                      S6D,
-                                      K,
-                                      Xs_selected[i], Xe_selected[i],
+                                       2*(number_of_correspondences+i), alphas_start + 4*i, alphas_end + 4*i,
+                                       lineEqs_selected[i], Sigmas2dlines_selected[i],
+                                       Sigmas3dlines_selected[i],
+                                       K,
+                                       Xs_selected[i], Xe_selected[i],
                                       sigmasDetLineSelected[i]);
 
+//                fill_M_uncertain_line_2(R_est, t_est, M,
+//                                      2*(number_of_correspondences+i), alphas_start + 4*i, alphas_end + 4*i,
+//                                      lineEqs_selected[i], Sigmas2dlines_selected[i],
+//                                      Sigmas3dlines_selected[i], K,
+//                                      Xs_selected[i], Xe_selected[i],
+//                                        0.5*(start_pts_2d_selected[i]+end_pts_2d_selected[i]));
             }
-
         }
 
         double mtm[12 * 12], d[12], ut[12 * 12];
@@ -3007,8 +2598,6 @@ namespace ORB_SLAM2 {
         find_betas_approx_3(&L_6x10, &Rho, Betas[3]);
         gauss_newton(&L_6x10, &Rho, Betas[3]);
         rep_errors[3] = compute_R_and_t(ut, Betas[3], Rs[3], ts[3]);
-
-//        std::cout << "EPnPU rep errors " << rep_errors[1] << " " << rep_errors[2] << " " << rep_errors[3] << std::endl;
 
         int N = 1;
         if (rep_errors[2] < rep_errors[1]) N = 2;

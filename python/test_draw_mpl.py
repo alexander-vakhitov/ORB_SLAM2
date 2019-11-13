@@ -18,9 +18,9 @@ import skimage.io as io
 import skimage.color as skc
 import skimage.transform as skt
 
-def plot_camera(ax, T, col=(0, 0, 0)):
+def plot_camera(ax, T, col=(0, 0, 0), lw = 1.0):
     s = 4*0.3
-    lw = 0.5
+    # lw = 1.0
     c = -np.transpose(T[0:3,0:3]).dot(T[0:3, 3])
 
     corners = []
@@ -44,48 +44,32 @@ def plot_camera(ax, T, col=(0, 0, 0)):
 
 
 
-def draw_map_covar(frame_num):
+def draw_map_covar(frame_num, draw_ellipses = True, is_draw_surf = False):
+    # plt.style.use('dark_background')
     deb_folder = '/home/alexander/materials/pnp3d/data/debug_pnpu/0/'
     Sigmas = reader.read_sigma_3d(deb_folder, frame_num)
     XX = reader.read_XX(deb_folder, frame_num)
-
-    fig = plt.figure(figsize=(8, 8))
+    sigmas = reader.read_sigmas2d(deb_folder, frame_num)
+    inliers = reader.read_inliers(deb_folder, frame_num, 3)
+    rinliers = reader.read_inliers(deb_folder, frame_num, 0)
+    fig = plt.figure(figsize=(12, 4))
     ax = fig.add_subplot(111, projection='3d')
 
     # number of ellipsoids
     ellipNumber = len(XX)
 
     # set colour map so each ellipsoid as a unique colour
-    norm = colors.Normalize(vmin=0, vmax=ellipNumber)
+    norm = colors.Normalize(vmin=0, vmax=np.max(sigmas))
     cmap = cm.jet
     m = cm.ScalarMappable(norm=norm, cmap=cmap)
 
-    max_depth = 15
+    max_depth = 30
 
-    for cnt in range(0, len(XX)):
-        # if np.linalg.norm(XX[cnt]) > 300:
-        #     continue
-        U2, s2, rotation2 = np.linalg.svd(Sigmas[cnt])
-        if np.mean(np.sqrt(s2)) > max_depth:
-            continue
-        if XX[cnt][2]<0:
-            continue
-        if XX[cnt][2]>max_depth:
-            continue
-        x,y,z = eldrawer.define_ellipsoid(XX[cnt], Sigmas[cnt])
-        # x, y, z = eldrawer.define_ellipsoid([0,0,0], np.eye(3), 1.0)
-        #ax.plot_surface(x, y, z, rstride=3, cstride=3, color=m.to_rgba(cnt), linewidth=0.1, alpha=1, shade=True)
-        ax.plot_wireframe(x, y, z, rstride=3, cstride=3, color=m.to_rgba(cnt), linewidth=0.1, alpha=1)
-
-    #plot camera
-
-    # ax.set_xlim3d(-max_depth / 2, max_depth / 2)
-    ax.set_xlim3d(-max_depth/3, max_depth / 3)
-    #ax.set_ylim3d(-max_depth / 4, max_depth / 4)
-    ax.set_ylim3d(-max_depth/3, max_depth / 3)
-    ax.set_zlim3d(0, max_depth)
-
-    # plot_camera(ax, np.eye(4), col=(0, 0, 0))
+    Rv = np.eye(3)
+    Rv[2,2] = 0
+    Rv[1,1] = 0
+    Rv[2,1] = -1
+    Rv[1,2] = 1
 
     T_ransac = reader.read_camera_pose('/home/alexander/materials/pnp3d/data/test_line_verification/0/0/', 'ransac_fin', frame_num)
     T_x_2 = reader.read_camera_pose('/home/alexander/materials/pnp3d/data/test_line_verification/0/0/', 'dlsu_x_2_fin',
@@ -94,21 +78,128 @@ def draw_map_covar(frame_num):
                                     frame_num)
     T_gt = reader.read_gt_pose('/home/alexander/materials/sego/kitti_odometry/dataset/poses/00.txt', frame_num)
     print(T_gt)
+    Rve = np.eye(4)
+    Rve[0:3,0:3] = Rv
 
-    plot_camera(ax, T_gt, col=(0, 0, 0))
-    plot_camera(ax, T_ransac, col=(0, 1, 0))
-    plot_camera(ax, T_x_2, col=(1, 0, 0))
-    plot_camera(ax, T_ep, col=(0, 0, 1))
 
-    img = io.imread('/home/alexander/materials/sego/kitti_odometry/dataset/sequences/00/image_0/00' + str(frame_num)+'.png')
-    img = skc.gray2rgb(img).astype(float)/255.0
-    img = skt.rescale(img, 0.1)
+    if draw_ellipses:
+        for cnt in range(0, len(XX)):
+            if inliers[cnt] == 0:
+                continue
+            # if np.linalg.norm(XX[cnt]) > 300:
+            #     continue
+            U2, s2, rotation2 = np.linalg.svd(Sigmas[cnt])
+            if np.mean(np.sqrt(s2)) > max_depth:
+                continue
+            if XX[cnt][2]<0:
+                continue
+            if XX[cnt][2]>max_depth:
+                continue
 
-    x = np.outer(np.ones(img.shape[0]), np.linspace(-max_depth/2, max_depth/2, img.shape[1]))
-    y = np.outer(np.linspace(-max_depth / 2, max_depth / 2, img.shape[0]), np.ones(img.shape[1]))
-    ax.plot_surface(x, y, max_depth*np.ones_like(x), rstride=1, cstride=1, facecolors=img, alpha=0.2)
+            s2d = sigmas[cnt]
+            x,y,z = eldrawer.define_ellipsoid(Rv.dot(XX[cnt]), Rv.dot(Sigmas[cnt]).dot(Rv.transpose()))
+            # x, y, z = eldrawer.define_ellipsoid([0,0,0], np.eye(3), 1.0)
+            #ax.plot_surface(x, y, z, rstride=3, cstride=3, color=m.to_rgba(cnt), linewidth=0.1, alpha=1, shade=True)
+            ax.plot_wireframe(x, y, z, rstride=3, cstride=3, color=m.to_rgba(s2d), linewidth=0.1, alpha=1)
+        plot_camera(ax, T_gt.dot(Rve.transpose()), col=(0, 0, 0), lw=4.0)
+        plot_camera(ax, T_ransac.dot(Rve.transpose()), col=(0, 0, 1), lw=3.0)
+        plot_camera(ax, T_x_2.dot(Rve.transpose()), col=(1, 0, 0), lw=2.0)
+        plot_camera(ax, T_ep.dot(Rve.transpose()), col=(0, 1, 0))
 
-    plt.show()
+    else:
+
+        for cnt in range(0, len(XX)):
+            if rinliers[cnt] == 0:
+                continue
+            # if np.linalg.norm(XX[cnt]) > 300:
+            #     continue
+            if XX[cnt][2] < 0:
+                continue
+            if XX[cnt][2] > max_depth:
+                continue
+
+            s2d = sigmas[cnt]
+            x, y, z = eldrawer.define_ellipsoid(Rv.dot(XX[cnt]), np.eye(3)*0.01)
+            # x, y, z = eldrawer.define_ellipsoid([0,0,0], np.eye(3), 1.0)
+            # ax.plot_surface(x, y, z, rstride=3, cstride=3, color=m.to_rgba(cnt), linewidth=0.1, alpha=1, shade=True)
+            ax.plot_wireframe(x, y, z, rstride=3, cstride=3, color=(0,0,1), linewidth=0.1, alpha=1)
+
+        plot_camera(ax, T_gt.dot(Rve.transpose()), col=(0, 0, 0), lw=4.0)
+        plot_camera(ax, T_ransac.dot(Rve.transpose()), col=(0, 0, 1), lw=3.0)
+
+    #plot camera
+
+    # ax.set_xlim3d(-max_depth / 2, max_depth / 2)
+    ax.set_xlim3d(-max_depth/3, max_depth / 3)
+    #ax.set_ylim3d(-max_depth / 4, max_depth / 4)
+    # ax.set_ylim3d(-max_depth/3, max_depth / 3)
+    # ax.set_zlim3d(0, max_depth)
+    ax.set_ylim3d(0, max_depth)
+    ax.set_zlim3d(-max_depth / 10, max_depth / 3)
+
+
+    # plot_camera(ax, np.eye(4), col=(0, 0, 0))
+
+
+    if is_draw_surf:
+        img = io.imread('/home/alexander/materials/sego/kitti_odometry/dataset/sequences/00/image_0/00' + str(frame_num)+'.png')
+        img = skc.gray2rgb(img).astype(float)/255.0
+        img = skt.rescale(img, 0.1)
+
+        x = np.outer(np.ones(img.shape[0]), np.linspace(-max_depth/2, max_depth/2, img.shape[1]))
+        y = np.outer(np.linspace(-max_depth / 2, max_depth / 2, img.shape[0]), np.ones(img.shape[1]))
+        ax.plot_surface(x, y, max_depth*np.ones_like(x), rstride=1, cstride=1, facecolors=img, alpha=0.2)
+
+    ax.view_init(elev=50,azim=-30)
+    # plt.show()
     # simple_ellipsoid.draw_ellipsoids(XX, Sigmas)
+    suff = ''
+    if not draw_ellipses:
+        suff = '_plain_'
+    plt.savefig('images/map_paper/'+str(frame_num)+suff+'.png')
 
-draw_map_covar(2904)
+def make_legend():
+    plt.style.use('dark_background')
+    fig = plt.figure(figsize=(3, 4))
+    ax = fig.add_subplot(111, projection='3d')
+
+    Rv = np.eye(3)
+    Rv[2,2] = 0
+    Rv[1,1] = 0
+    Rv[2,1] = -1
+    Rv[1,2] = 1
+
+    Rve = np.eye(4)
+    Rve[0:3,0:3] = Rv
+
+    T0 = np.eye(4).dot(Rve.transpose())
+    T1 = np.copy(T0)
+    T1[1,3] = 4
+
+    T2 = np.copy(T0)
+    T2[1, 3] = 8
+
+    T3 = np.copy(T0)
+    T3[1, 3] = 12
+
+    plot_camera(ax, T0, col=(0, 0, 0), lw=4.0)
+    plot_camera(ax, T1, col=(0, 0, 1), lw=3.0)
+    plot_camera(ax, T2, col=(1, 0, 0), lw=2.0)
+    plot_camera(ax, T3, col=(0, 1, 0))
+    ax.grid(False)
+    ax.set_xlim3d(-15,15)
+    ax.set_ylim3d(-8, 8)
+    ax.set_zlim3d(-15, 15)
+
+    # plt.show()
+    plt.savefig('images/legend_frustum.png', dpi=250)
+
+# for i in range(104, 500):
+#     draw_map_covar(i, False)
+
+# make_legend()
+
+draw_map_covar(119)
+draw_map_covar(157)
+draw_map_covar(227)
+draw_map_covar(275)

@@ -22,6 +22,8 @@
 #include "ORBmatcher.h"
 
 #include<mutex>
+#include <Eigen/Dense>
+#include <opencv/cxeigen.hpp>
 
 namespace ORB_SLAM2
 {
@@ -38,6 +40,8 @@ MapPoint::MapPoint(const cv::Mat &Pos, KeyFrame *pRefKF, Map* pMap):
     Pos.copyTo(mWorldPos);
 
     mWorldCov = cv::Mat::zeros(3, 3, CV_32F);
+
+
 
     mNormalVector = cv::Mat::zeros(3,1,CV_32F);
 
@@ -83,11 +87,22 @@ void MapPoint::SetWorldPos(const cv::Mat &Pos)
     Pos.copyTo(mWorldPos);
 }
 
-void MapPoint::SetWorldCov(const cv::Mat &Cov)
+//void MapPoint::SetWorldCov(const cv::Mat &Cov)
+//{
+//    unique_lock<mutex> lock2(mGlobalMutex);
+//    unique_lock<mutex> lock(mMutexPos);
+//    Cov.copyTo(mWorldCov);
+//}
+
+cv::Mat MapPoint::GetInformation(int type, const cv::Mat& R, const cv::Mat& t, double fx, double fy, double cx, double cy)
 {
-    unique_lock<mutex> lock2(mGlobalMutex);
     unique_lock<mutex> lock(mMutexPos);
-    Cov.copyTo(mWorldCov);
+    cv::Mat Xc = R * mWorldPos + t;
+    if (type == 0)
+    {
+
+    }
+    return cv::Mat();
 }
 
 
@@ -97,17 +112,151 @@ cv::Mat MapPoint::GetWorldPos()
     return mWorldPos.clone();
 }
 
-cv::Mat MapPoint::GetWorldCov()
+void MapPoint::SetWorldCov(const cv::Mat& covMat) {
+//    unique_lock<mutex> lock(mMutexPos);
+//    mWorldCov = covMat.clone();
+}
+
+cv::Mat MapPoint::GetWorldCov(const Eigen::Vector3d& cam_center)
 {
-    unique_lock<mutex> lock(mMutexPos);
-    if (mWorldCov.cols > 0)
+//    unique_lock<mutex> lock(mMutexPos);
+//    if (mWorldCov.cols > 0)
+//    {
+//        return mWorldCov.clone();
+//    } else {
+//        return cv::Mat();
+//    }
+
+    std::pair<KeyFrame*, int> best_obs;
+    best_obs.first = NULL;
+    best_obs.second = -1;
+    double best_dist = 1e6;
+    for (auto& obs: mObservations)
     {
-        return mWorldCov.clone();
-    } else {
+        KeyFrame* kf = obs.first;
+        int id = obs.second;
+
+        if (id < 0 || kf->mvDepth[id] < 0)
+        {
+            continue;
+        }
+        Eigen::Vector3d kfc;
+        cv::cv2eigen(kf->GetCameraCenter(), kfc);
+        double d = (cam_center - kfc).norm();
+        if (kf->mvDepth[id] < best_dist)
+        {
+//            best_depth = kf->mvDepth[id];
+            best_dist = d;
+            best_obs = obs;
+        }
+    }
+    if (best_obs.second >= 0)
+    {
+        KeyFrame* best_kf = best_obs.first;
+        int best_id = best_obs.second;
+        return best_kf->UnprojectPointCovFromParams(best_id, GetWorldPos());
+    }
+    return cv::Mat();
+}
+
+void GetMonoJac(const Eigen::Vector3d& Xc, Eigen::Matrix<double, 2, 3>* J_mono)
+{
+    J_mono->setZero();
+    (*J_mono)(0,0) = 1.0/Xc(2);
+    (*J_mono)(0,2) = -Xc(0)/Xc(2)/Xc(2);
+    (*J_mono)(1,1) = 1.0/Xc(2);
+    (*J_mono)(1,2) = -Xc(1)/Xc(2)/Xc(2);
+}
+
+void GetStereoJac(const Eigen::Vector3d& Xc, double b, Eigen::Matrix3d* J_s)
+{
+    J_s->setZero();
+    (*J_s)(0,0) = 1.0/Xc(2);
+    (*J_s)(0,2) = -Xc(0)/Xc(2)/Xc(2);
+    (*J_s)(1,1) = 1.0/Xc(2);
+    (*J_s)(1,2) = -Xc(1)/Xc(2)/Xc(2);
+    (*J_s)(2,0) = 1.0/Xc(2);
+    (*J_s)(2,2) = -(Xc(0)-b)/Xc(2)/Xc(2);
+}
+
+cv::Mat MapPoint::GetWorldCovFull()
+{
+    unique_lock<mutex> lock(mMutexFeatures);
+    int cnt = 0;
+    for (auto& obs: mObservations)
+    {
+        KeyFrame* kf = obs.first;
+        int id = obs.second;
+
+        if (id < 0)
+        {
+            continue;
+        }
+        if (kf->mvDepth[id] < 0)
+        {
+            cnt += 2;
+        } else {
+            cnt += 3;
+        }
+    }
+    if (cnt < 3)
+    {
         return cv::Mat();
     }
 
+    cv::Mat X_cv = GetWorldPos();
+    Eigen::Vector3d X;
+    cv::cv2eigen(X_cv, X);
+
+    Eigen::Matrix3d JtJ, JtJ_w;
+    JtJ.setZero();
+    JtJ_w.setZero();
+    cnt = 0;
+    for (auto& obs: mObservations)
+    {
+        KeyFrame* kf = obs.first;
+        int id = obs.second;
+
+        if (id < 0)
+        {
+            continue;
+        }
+
+        Eigen::Matrix4d Tcw_eig;
+        cv::cv2eigen(kf->GetPose(), Tcw_eig);
+        Eigen::Vector3d Xc = Tcw_eig.block<3,3>(0,0) * X + Tcw_eig.block<3,1>(0,3);
+
+        if (kf->mvDepth[id] < 0)
+        {
+            Eigen::Matrix<double, 2, 3> J_mono;
+            GetMonoJac(Xc, &J_mono);
+            JtJ = JtJ + J_mono.transpose() * J_mono;
+            JtJ_w = JtJ_w + J_mono.transpose() * J_mono * kf->mvLevelSigma2[kf->mvKeys[id].octave] / kf->fx / kf->fx;
+            cnt += 2;
+        } else {
+            Eigen::Matrix3d J_s;
+            GetStereoJac(Xc, kf->mb, &J_s);
+            JtJ = JtJ + J_s.transpose() * J_s;
+            JtJ_w = JtJ_w + J_s.transpose() * J_s* kf->mvLevelSigma2[kf->mvKeys[id].octave] / kf->fx / kf->fx;
+            cnt += 3;
+        }
+    }
+    Eigen::Matrix3d Sigma_eig = JtJ.inverse() * JtJ_w * JtJ.inverse();
+//    std::cout << "sigma full " << std::endl;
+//    std::cout << Sigma_eig << std::endl;
+    cv::Mat Sigma(3, 3, CV_32FC1);
+    for (int i = 0; i < 3; i++)
+    {
+        for (int j = 0; j < 3; j++)
+        {
+            Sigma.at<float>(i, j) = Sigma_eig(i, j);
+        }
+    }
+    return Sigma.clone();
 }
+
+
+
 
 
 cv::Mat MapPoint::GetNormal()

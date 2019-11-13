@@ -25,11 +25,15 @@
 #include"Frame.h"
 #include"Map.h"
 
+#include <Eigen/Dense>
 #include<opencv2/core/core.hpp>
 #include<mutex>
 
 namespace ORB_SLAM2
 {
+
+void GetStereoJac(const Eigen::Vector3d& Xc, double b, Eigen::Matrix3d* J_s);
+void GetMonoJac(const Eigen::Vector3d& Xc, Eigen::Matrix<double, 2, 3>* J_m);
 
 class KeyFrame;
 class Map;
@@ -45,7 +49,10 @@ public:
     void SetWorldPos(const cv::Mat &Pos);
     void SetWorldCov(const cv::Mat &Cov);
     cv::Mat GetWorldPos();
-    cv::Mat GetWorldCov();
+    cv::Mat GetWorldCov(const Eigen::Vector3d& cam_center);
+    cv::Mat GetWorldCovFull();
+
+    cv::Mat GetInformation(int type, const cv::Mat& R, const cv::Mat& t, double fx, double fy, double cx, double cy);
 
     cv::Mat GetNormal();
     KeyFrame* GetReferenceKeyFrame();

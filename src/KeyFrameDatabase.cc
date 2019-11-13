@@ -196,13 +196,23 @@ vector<KeyFrame*> KeyFrameDatabase::DetectLoopCandidates(KeyFrame* pKF, float mi
     return vpLoopCandidates;
 }
 
-vector<KeyFrame*> KeyFrameDatabase::DetectRelocalizationCandidates(Frame *F)
+vector<KeyFrame*> KeyFrameDatabase::DetectRelocalizationCandidates(Frame *F, bool is_strong)
 {
     list<KeyFrame*> lKFsSharingWords;
 
     // Search all keyframes that share a word with current frame
     {
         unique_lock<mutex> lock(mMutex);
+
+        std::string kfIdLog = "";
+
+        for(DBoW2::BowVector::const_iterator vit=F->mBowVec.begin(), vend=F->mBowVec.end(); vit != vend; vit++) {
+            list<KeyFrame *> &lKFs = mvInvertedFile[vit->first];
+            for (list<KeyFrame *>::iterator lit = lKFs.begin(), lend = lKFs.end(); lit != lend; lit++) {
+                KeyFrame* pKFi=*lit;
+                pKFi->mnRelocQuery = -1;
+            }
+        }
 
         for(DBoW2::BowVector::const_iterator vit=F->mBowVec.begin(), vend=F->mBowVec.end(); vit != vend; vit++)
         {
@@ -218,8 +228,11 @@ vector<KeyFrame*> KeyFrameDatabase::DetectRelocalizationCandidates(Frame *F)
                     lKFsSharingWords.push_back(pKFi);
                 }
                 pKFi->mnRelocWords++;
+                kfIdLog += std::to_string(pKFi->mnFrameId) + " ";
             }
         }
+
+//        std::cout << " KFs sharing words " << kfIdLog << std::endl;
     }
     if(lKFsSharingWords.empty())
         return vector<KeyFrame*>();
@@ -233,6 +246,12 @@ vector<KeyFrame*> KeyFrameDatabase::DetectRelocalizationCandidates(Frame *F)
     }
 
     int minCommonWords = maxCommonWords*0.8f;
+    if (!is_strong)
+    {
+        minCommonWords = 10;
+    }
+
+    std::cout << "common words min " << minCommonWords << " max " << maxCommonWords << std::endl;
 
     list<pair<float,KeyFrame*> > lScoreAndMatch;
 
@@ -251,6 +270,8 @@ vector<KeyFrame*> KeyFrameDatabase::DetectRelocalizationCandidates(Frame *F)
             lScoreAndMatch.push_back(make_pair(si,pKFi));
         }
     }
+
+    std::cout << " KFs with score no. " << lScoreAndMatch.size() << std::endl;
 
     if(lScoreAndMatch.empty())
         return vector<KeyFrame*>();
@@ -288,6 +309,7 @@ vector<KeyFrame*> KeyFrameDatabase::DetectRelocalizationCandidates(Frame *F)
 
     // Return all those keyframes with a score higher than 0.75*bestScore
     float minScoreToRetain = 0.75f*bestAccScore;
+
     set<KeyFrame*> spAlreadyAddedKF;
     vector<KeyFrame*> vpRelocCandidates;
     vpRelocCandidates.reserve(lAccScoreAndMatch.size());

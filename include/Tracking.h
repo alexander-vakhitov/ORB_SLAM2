@@ -77,6 +77,11 @@ public:
     // Use this function if you have deactivated local mapping and you only want to localize the camera.
     void InformOnlyTracking(const bool &flag);
 
+    void SetNewPnpMode(int newMode, bool isPoseOpt, bool isCovOpt, bool isURansac, double coeff = 1.0);
+
+    int miRelocFrameId;
+
+    int miInlierCount;
 
 public:
 
@@ -116,6 +121,8 @@ public:
     // True if local mapping is deactivated and we are performing only localization
     bool mbOnlyTracking;
 
+    bool mbNoPoseOpt = false;
+
     void Reset();
 
     std::vector<eTrackingState> tracker_state_history;
@@ -143,10 +150,11 @@ protected:
     void UpdateLastFrame();
     bool TrackWithMotionModel();
 
-    bool TrackWithMotionModelSego();
     bool TrackReferenceSego();
+    bool TrackReferencePNP();
+//    bool RelocPNP(Frame* baseFrame);
 
-    bool Relocalization();
+    bool Relocalization(bool is_strong = true);
 
     void UpdateLocalMap();
     void UpdateLocalPoints();
@@ -159,7 +167,9 @@ protected:
     void CreateNewKeyFrame();
 
     PnPUsolver2* SetupPnPU(const Frame &F, const vector<MapPoint*> &vpMapPointMatches);
-    PnPsolver* SetupPnP(const Frame &F, const vector<MapPoint*> &vpMapPointMatches);
+    PnPsolver* SetupPnP(const Frame &F, const vector<MapPoint*> &vpMapPointMatches, KeyFrame& kf);
+
+
 
     // In case of performing only localization, this flag is true when there are no matches to
     // points in the map. Still tracking will continue if there are enough matches with temporal points.
@@ -232,7 +242,11 @@ protected:
 
     list<MapPoint*> mlpTemporalPoints;
 
-    int mnPnpMode;
+    int mnPnpMode = 0;
+    int mnPnpRelocMode = 0;
+    bool mbIsCovOpt = false;
+    bool mbIsURansac = false;
+    double mdPnPCoeff = 1.0;
 };
 
 } //namespace ORB_SLAM

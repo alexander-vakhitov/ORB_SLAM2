@@ -65,7 +65,10 @@ public:
 
     int SearchByBoW(KeyFrame *pKF, Frame &F, std::vector<MapPoint*> &vpMapPointMatches, bool is_right = false);
     int SearchByBoWKP(KeyFrame* pKF,Frame &F, vector<std::pair<cv::KeyPoint, cv::KeyPoint>> &vpKeyPointMatches,
-                      vector<MapPoint*> &vpMapPointMatches, bool is_right);
+                      vector<MapPoint*> &vpMapPointMatches, bool is_right, bool is_mappoint_reqd=true);
+
+    int SearchByBoWF(Frame* F_init,Frame &F_curr, vector<std::pair<cv::KeyPoint, cv::KeyPoint>> &vpKeyPointMatches,
+                      bool is_right);
     //end av
 
     int SearchByBoW(KeyFrame *pKF1, KeyFrame* pKF2, std::vector<MapPoint*> &vpMatches12);

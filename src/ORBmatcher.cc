@@ -1662,11 +1662,183 @@ int ORBmatcher::DescriptorDistance(const cv::Mat &a, const cv::Mat &b)
     return dist;
 }
 
+int ORBmatcher::SearchByBoWF(Frame* F_init,Frame &F_curr, vector<std::pair<cv::KeyPoint, cv::KeyPoint>> &vpKeyPointMatches,
+                                 bool is_right)
+{
+
+    int N_f = 0;
+    if (is_right)
+    {
+        N_f = F_curr.mvKeysRight.size();
+    } else {
+        N_f = F_curr.N;
+    }
+
+    vpKeyPointMatches = vector<std::pair<cv::KeyPoint, cv::KeyPoint> >(N_f,
+                                                                       std::make_pair(cv::KeyPoint(-1, -1, 0),
+                                                                                      cv::KeyPoint(-1, -1, 0)));
+
+    const DBoW2::FeatureVector &vFeatVecKF = F_init->mFeatVec;
+
+    int nmatches=0;
+
+    vector<int> rotHist[HISTO_LENGTH];
+    for(int i=0;i<HISTO_LENGTH;i++)
+        rotHist[i].reserve(500);
+    const float factor = 1.0f/HISTO_LENGTH;
+
+    // We perform the matching over ORB that belong to the same vocabulary node (at a certain level)
+
+    //av
+    /*DBoW2::FeatureVector::const_iterator KFit = vFeatVecKF.begin();
+    DBoW2::FeatureVector::const_iterator Fit = F.mFeatVec.begin();
+    DBoW2::FeatureVector::const_iterator KFend = vFeatVecKF.end();
+    DBoW2::FeatureVector::const_iterator Fend = F.mFeatVec.end();*/
+
+    DBoW2::FeatureVector::const_iterator KFit = vFeatVecKF.begin();
+    DBoW2::FeatureVector::const_iterator Fit;
+    DBoW2::FeatureVector::const_iterator KFend = vFeatVecKF.end();
+    DBoW2::FeatureVector::const_iterator Fend;
+    if (is_right)
+    {
+        Fit = F_curr.mFeatVecRight.begin();
+        Fend = F_curr.mFeatVecRight.end();
+    } else {
+        Fit = F_curr.mFeatVec.begin();
+        Fend = F_curr.mFeatVec.end();
+    }
+
+
+    while(KFit != KFend && Fit != Fend)
+    {
+        if(KFit->first == Fit->first)
+        {
+            const vector<unsigned int> vIndicesKF = KFit->second;
+            const vector<unsigned int> vIndicesF = Fit->second;
+
+            for(size_t iKF=0; iKF<vIndicesKF.size(); iKF++)
+            {
+                const unsigned int realIdxKF = vIndicesKF[iKF];
+
+                if (F_init->l2r[realIdxKF] < 0)
+                    continue;
+
+                const cv::Mat &dKF= F_init->mDescriptors.row(realIdxKF);
+
+                int bestDist1=256;
+                int bestIdxF =-1 ;
+                int bestDist2=256;
+
+                for(size_t iF=0; iF<vIndicesF.size(); iF++)
+                {
+                    const unsigned int realIdxF = vIndicesF[iF];
+
+                    if(vpKeyPointMatches[realIdxF].first.pt.x >= 0)
+                        continue;
+
+                    if (is_right && F_curr.r2l[realIdxF] >= 0)
+                    {
+                        continue;
+                    }
+
+
+                    //av
+                    //const cv::Mat &dF = F.mDescriptors.row(realIdxF);
+
+                    const cv::Mat &dF = (is_right) ? F_curr.mDescriptorsRight.row(realIdxF) : F_curr.mDescriptors.row(realIdxF);
+                    //end av
+
+                    const int dist =  DescriptorDistance(dKF,dF);
+
+                    if(dist<bestDist1)
+                    {
+                        bestDist2=bestDist1;
+                        bestDist1=dist;
+                        bestIdxF=realIdxF;
+                    }
+                    else if(dist<bestDist2)
+                    {
+                        bestDist2=dist;
+                    }
+                }
+
+                if(bestDist1<=TH_LOW)
+                {
+                    if(static_cast<float>(bestDist1)<mfNNratio*static_cast<float>(bestDist2))
+                    {
+
+                        const cv::KeyPoint &kp = F_init->mvKeys[realIdxKF];
+                        const cv::KeyPoint &kpr = F_init->mvKeysRight[F_init->l2r[realIdxKF]];
+                        vpKeyPointMatches[bestIdxF]=std::make_pair(kp, kpr);
+
+                        if(mbCheckOrientation)
+                        {
+                            //av
+                            //float rot = kp.angle-F.mvKeys[bestIdxF].angle;
+                            float angle = (is_right) ? F_curr.mvKeysRight[bestIdxF].angle : F_curr.mvKeys[bestIdxF].angle;
+                            float rot = kp.angle-angle;
+
+                            //end av
+                            if(rot<0.0)
+                                rot+=360.0f;
+                            int bin = round(rot*factor);
+                            if(bin==HISTO_LENGTH)
+                                bin=0;
+                            assert(bin>=0 && bin<HISTO_LENGTH);
+                            rotHist[bin].push_back(bestIdxF);
+                        }
+                        nmatches++;
+                    }
+                }
+
+            }
+
+            KFit++;
+            Fit++;
+        }
+        else if(KFit->first < Fit->first)
+        {
+            KFit = vFeatVecKF.lower_bound(Fit->first);
+        }
+        else
+        {
+            //av
+            //Fit = F.mFeatVec.lower_bound(KFit->first);
+
+            Fit = (is_right) ? F_curr.mFeatVecRight.lower_bound(KFit->first) : F_curr.mFeatVec.lower_bound(KFit->first);
+            //end av
+        }
+    }
+
+
+    if(mbCheckOrientation)
+    {
+        int ind1=-1;
+        int ind2=-1;
+        int ind3=-1;
+
+        ComputeThreeMaxima(rotHist,HISTO_LENGTH,ind1,ind2,ind3);
+
+        for(int i=0; i<HISTO_LENGTH; i++)
+        {
+            if(i==ind1 || i==ind2 || i==ind3)
+                continue;
+            for(size_t j=0, jend=rotHist[i].size(); j<jend; j++)
+            {
+                vpKeyPointMatches[rotHist[i][j]]=std::make_pair(cv::KeyPoint(-1,-1,0), cv::KeyPoint(-1,-1,0));
+                nmatches--;
+            }
+        }
+    }
+
+    return nmatches;
+
+}
 
 int ORBmatcher::SearchByBoWKP(KeyFrame* pKF,Frame &F,
                               vector<std::pair<cv::KeyPoint, cv::KeyPoint>> &vpKeyPointMatches,
                               vector<MapPoint*> &vpMapPointMatches,
-                              bool is_right)
+                              bool is_right, bool is_mappoint_reqd)
 //end av
 {
     const vector<MapPoint*> vpMapPointsKF = pKF->GetMapPointMatches();
@@ -1728,10 +1900,10 @@ int ORBmatcher::SearchByBoWKP(KeyFrame* pKF,Frame &F,
 
                 MapPoint* pMP = vpMapPointsKF[realIdxKF];
 
-                if(!pMP)
+                if(is_mappoint_reqd && !pMP)
                     continue;
 
-                if(pMP->isBad())
+                if(is_mappoint_reqd && pMP->isBad())
                     continue;
 
                 if (pKF->l2r[realIdxKF] < 0)

@@ -93,6 +93,7 @@ public:
     // KeyPoint functions
     std::vector<size_t> GetFeaturesInArea(const float &x, const float  &y, const float  &r) const;
     cv::Mat UnprojectStereo(int i);
+    cv::Mat UnprojectCov(const int &i);
 
     // Image
     bool IsInImage(const float &x, const float &y) const;
@@ -115,6 +116,11 @@ public:
     static bool lId(KeyFrame* pKF1, KeyFrame* pKF2){
         return pKF1->mnId<pKF2->mnId;
     }
+
+    cv::Mat UnprojectPointCovFromParams(float z, float x, float y, float sigma_x_2,
+                                                  float cx, float cy, float b, float f, const cv::Mat& Rwc);
+
+    cv::Mat UnprojectPointCovFromParams(int id, const cv::Mat& X_cv);
 
 
     // The following variables are accesed from only 1 thread or never change (no mutex needed).

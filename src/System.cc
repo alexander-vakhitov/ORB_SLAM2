@@ -144,6 +144,11 @@ cv::Mat System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight, const
             mpLocalMapper->Release();
             mbDeactivateLocalizationMode = false;
         }
+        if (mbChangePnpMode)
+        {
+            mpTracker->SetNewPnpMode(mNewPnpMode, mNewIsPoseOpt, mIsCovOpt, mIsURansac, mdPnPCoeff);
+            mbChangePnpMode = false;
+        }
     }
 
     // Check reset
@@ -273,6 +278,19 @@ void System::ActivateLocalizationMode()
     unique_lock<mutex> lock(mMutexMode);
     mbActivateLocalizationMode = true;
 }
+
+void System::ChangePnpMode(int newMode, bool isPoseOpt, bool isCovOpt, bool isURansac, double coeff)
+{
+    unique_lock<mutex> lock(mMutexMode);
+    mbChangePnpMode = true;
+    mNewPnpMode = newMode;
+    mNewIsPoseOpt = isPoseOpt;
+    mIsCovOpt = isCovOpt;
+    mIsURansac = isURansac;
+    mdPnPCoeff = coeff;
+}
+
+
 
 void System::DeactivateLocalizationMode()
 {
@@ -417,13 +435,19 @@ void System::SaveKeyFrameTrajectoryTUM(const string &filename)
     cout << endl << "trajectory saved!" << endl;
 }
 
-void System::SaveTrajectoryKITTI(const string &filename)
+void System::GetLocalizationDetails(int* inlierCount, int* frameId)
+{
+    *frameId = mpTracker->miRelocFrameId;
+    *inlierCount = mpTracker->miInlierCount;
+}
+
+cv::Mat System::SaveTrajectoryKITTI(const string &filename)
 {
     cout << endl << "Saving camera trajectory to " << filename << " ..." << endl;
     if(mSensor==MONOCULAR)
     {
         cerr << "ERROR: SaveTrajectoryKITTI cannot be used for monocular." << endl;
-        return;
+        return cv::Mat();
     }
 
     vector<KeyFrame*> vpKFs = mpMap->GetAllKeyFrames();
@@ -470,6 +494,7 @@ void System::SaveTrajectoryKITTI(const string &filename)
     }
     f.close();
     cout << endl << "trajectory saved!" << endl;
+    return Two;
 }
 
 int System::GetTrackingState()
