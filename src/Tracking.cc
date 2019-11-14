@@ -483,10 +483,10 @@ void Tracking::Track()
                 if (mVelocity.empty() || mCurrentFrame.mnId < mnLastRelocFrameId + 2) {
                     bOK = TrackReferenceKeyFrame();
                 } else {
-                        bOK = TrackWithMotionModel();
-//                    bOK = false;
+//                        bOK = TrackWithMotionModel();
+                    bOK = false;
                     if (!bOK) {
-//                        bOK = TrackReferenceSego();
+                        bOK = TrackReferenceSego();
                         if (!bOK)
                         {
                             bOK = TrackReferenceKeyFrame();
@@ -1318,8 +1318,8 @@ void Tracking::UpdateLastFrame()
             double s3dmax = -1;
 
             std::vector<bool> vbInliersFin = vbInliers;
-            int nInliersFin = pose_ref.Refine(&T_ref_fin, p2D, sigma2_lr, p3D, sigma3_lr, sigma3full_lr, vbInliersFin,
-                                              s3dmin, s3dmax);
+            int nInliersFin = 0;//pose_ref.Refine(&T_ref_fin, p2D, sigma2_lr, p3D, sigma3_lr, sigma3full_lr, vbInliersFin,
+                                  //            s3dmin, s3dmax);
 
             for (int i = 0; i < 3; i++)
             {
@@ -1348,7 +1348,7 @@ void Tracking::UpdateLastFrame()
 
             // Project points seen in previous frame
             int th;
-            if(mSensor!=System::STEREO || mnPnpRelocMode>0)
+            if(mSensor!=System::STEREO)// || mnPnpRelocMode>0
                 th=15;
             else
                 th=7;

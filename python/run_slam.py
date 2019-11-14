@@ -82,11 +82,11 @@ def run_slam_euroc_half(seq_id=0, q=1):
     ts_lbls = ['MH01', 'MH02', 'MH03', 'V203']
     slbl = seq_lbls[seq_id]
     tslbl = ts_lbls[seq_id]
-    for ti in range(0, 3):
+    for ti in range(0, 5):
         #for mi in range(0, 4):
-        for mi in [0]:
+        for mi in [0,3]:
             # for mode_id in range(0, 4):
-            store_dir = "pnpueuroc_noreloc_" +str(q) + '/' + slbl + '/'
+            store_dir = "pnpueuroc_night2_" +str(q) + '/' + slbl + '/'
             if not os.path.exists(store_dir ):
                 os.makedirs(store_dir )
             # while not os.path.exists(fname_test):
@@ -111,7 +111,7 @@ def run_slam_euroc_half(seq_id=0, q=1):
 
             time.sleep(5)
 
-            # x = input("check traj!")
+            x = input("check traj!")
         # fname = 'CameraTrajectory_' + str(ti) + '.txt'
         # if os.path.exists(fname):
         #     shutil.move(fname, store_dir + '/' + fname)
@@ -137,7 +137,7 @@ if __name__ == '__main__':
     # run_slam_half('00')
     # run_slam_half('01')
     # run_slam_half('02')
-    for q in range(3, 4):
+    for q in range(2, 5):
         for si in range(0, 3):
             run_slam_euroc_half(si, q)
     # run_slam_euroc_half(1)

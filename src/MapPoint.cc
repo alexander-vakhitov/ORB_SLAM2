@@ -230,12 +230,14 @@ cv::Mat MapPoint::GetWorldCovFull()
         {
             Eigen::Matrix<double, 2, 3> J_mono;
             GetMonoJac(Xc, &J_mono);
+            J_mono = J_mono * Tcw_eig.block<3,3>(0,0);
             JtJ = JtJ + J_mono.transpose() * J_mono;
             JtJ_w = JtJ_w + J_mono.transpose() * J_mono * kf->mvLevelSigma2[kf->mvKeys[id].octave] / kf->fx / kf->fx;
             cnt += 2;
         } else {
             Eigen::Matrix3d J_s;
             GetStereoJac(Xc, kf->mb, &J_s);
+            J_s = J_s * Tcw_eig.block<3,3>(0,0);
             JtJ = JtJ + J_s.transpose() * J_s;
             JtJ_w = JtJ_w + J_s.transpose() * J_s* kf->mvLevelSigma2[kf->mvKeys[id].octave] / kf->fx / kf->fx;
             cnt += 3;
