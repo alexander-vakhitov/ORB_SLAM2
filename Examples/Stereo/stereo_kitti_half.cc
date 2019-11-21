@@ -31,7 +31,6 @@
 #include<opencv2/core/core.hpp>
 
 #include<System.h>
-#include <cublas_v2.h>
 
 
 using namespace std;
@@ -98,7 +97,7 @@ void runLocalization(const std::string& trajPath, int nCycles, ORB_SLAM2::System
 void runPipeline(const std::string& settingsPath, const std::string& vocPath,
                 int trial, int nImages, const vector<double>& vTimestamps,
                 const vector<string>& vstrImageLeft, const vector<string>& vstrImageRight, bool is_debug_opt,
-                 const std::string& pref, int pnpMode=0)
+                 const std::string& pref, int pnpMode=0, int q=1)
 {
     int n_modes = 2;
     if (is_debug_opt)
@@ -107,7 +106,7 @@ void runPipeline(const std::string& settingsPath, const std::string& vocPath,
     }
     bool isPoseOpt = true;
     std::string settingsPathMode = settingsPath + "_" + std::to_string(0) + ".yaml";
-    ORB_SLAM2::System SLAM(vocPath,settingsPathMode,ORB_SLAM2::System::STEREO,true);
+    ORB_SLAM2::System SLAM(vocPath,settingsPathMode,ORB_SLAM2::System::STEREO, true, pref + "/" + std::to_string(pnpMode) +"_" + std::to_string(trial));
 
     // Vector for tracking time statistics
     vector<float> vTimesTrack;
@@ -133,9 +132,11 @@ void runPipeline(const std::string& settingsPath, const std::string& vocPath,
 
     int nCycles = nImages;
 
+    std::ofstream mom_traj_out(pref + "/MomCameraTrajectory_" + std::to_string(pnpMode) +"_" + std::to_string(trial) + ".txt");
+
     for(int ni=0; ni<nCycles; ni++)
     {
-        if (ni % 2 == 1)
+        if (ni % q != 0)
         {
             continue;
         }
@@ -164,6 +165,15 @@ void runPipeline(const std::string& settingsPath, const std::string& vocPath,
         {
             return;
         }
+
+        for (int ii = 0; ii < 3; ii++)
+        {
+            for (int jj = 0; jj < 4; jj++)
+            {
+                mom_traj_out << Tr.at<float>(ii, jj) << " ";
+            }
+        }
+        mom_traj_out << std::endl;
 
 
         std::cout << "SLAM " << ni << std::endl;
@@ -355,8 +365,8 @@ void test_pnp_solver()
 int main(int argc, char **argv)
 {
 
-    test_pnp_solver();
-    return 0;
+//    test_pnp_solver();
+//    return 0;
 
     if(argc < 6)
     {
@@ -369,6 +379,7 @@ int main(int argc, char **argv)
     {
         pnpMode = atoi(argv[6]);
     }
+    int q = atoi(argv[7]);
 
     // Retrieve paths to images
     vector<string> vstrImageLeft;
@@ -389,7 +400,7 @@ int main(int argc, char **argv)
     bool is_debug_opt = false;
 
     runPipeline(settingsPath, argv[1], trial, nImages, vTimestamps, vstrImageLeft, vstrImageRight, is_debug_opt, argv[5],
-                pnpMode);
+                pnpMode, q);
 
 //    for (int mode = 0; mode < 4; mode++) {
 //        for (int trial = 0; trial < 5; trial++)

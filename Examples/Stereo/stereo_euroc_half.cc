@@ -494,6 +494,8 @@ int main(int argc, char **argv)
 
     ORB_SLAM2::System SLAM(argv[1],argv[2],ORB_SLAM2::System::STEREO,false);
 
+    std::cout << " using pnp mode " << pnpMode << std::endl;
+
     SLAM.ChangePnpMode(pnpMode, isPoseOpt, (pnpMode>0), false);
 
     sleep_ms(10e6);

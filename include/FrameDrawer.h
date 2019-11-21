@@ -48,6 +48,9 @@ public:
     // Draw last processed frame.
     cv::Mat DrawFrame();
 
+    bool update_happened;
+    std::mutex mMutex;
+
 protected:
 
     void DrawTextInfo(cv::Mat &im, int nState, cv::Mat &imText);
@@ -65,7 +68,7 @@ protected:
 
     Map* mpMap;
 
-    std::mutex mMutex;
+//    std::mutex mMutex;
 };
 
 } //namespace ORB_SLAM

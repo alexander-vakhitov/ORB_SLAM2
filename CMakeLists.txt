@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 2.8)
 project(ORB_SLAM2)
 
-set(SEGO_INCLUDE "/home/alexander/materials/pnp3d/segoexp/sego")
+set(SEGO_INCLUDE "/home/vakhitov/projects/sego")
 
 IF(NOT CMAKE_BUILD_TYPE)
   SET(CMAKE_BUILD_TYPE Release)

@@ -27,7 +27,7 @@
 namespace ORB_SLAM2
 {
 
-Viewer::Viewer(System* pSystem, FrameDrawer *pFrameDrawer, MapDrawer *pMapDrawer, Tracking *pTracking, const string &strSettingPath):
+Viewer::Viewer(System* pSystem, FrameDrawer *pFrameDrawer, MapDrawer *pMapDrawer, Tracking *pTracking, const string &strSettingPath, const string &prefixPath):
     mpSystem(pSystem), mpFrameDrawer(pFrameDrawer),mpMapDrawer(pMapDrawer), mpTracker(pTracking),
     mbFinishRequested(false), mbFinished(true), mbStopped(true), mbStopRequested(false)
 {
@@ -50,6 +50,9 @@ Viewer::Viewer(System* pSystem, FrameDrawer *pFrameDrawer, MapDrawer *pMapDrawer
     mViewpointY = fSettings["Viewer.ViewpointY"];
     mViewpointZ = fSettings["Viewer.ViewpointZ"];
     mViewpointF = fSettings["Viewer.ViewpointF"];
+
+    is_save = true;
+    prefix = prefixPath;
 }
 
 void Viewer::Run()
@@ -137,6 +140,18 @@ void Viewer::Run()
 
         cv::Mat im = mpFrameDrawer->DrawFrame();
         cv::imshow("ORB-SLAM2: Current Frame",im);
+
+        unique_lock<mutex>(mpFrameDrawer->mMutex);
+        if (is_save && mpFrameDrawer->update_happened)
+        {
+            std::string save_img_path = prefix + "/frames/" + std::to_string(img_id) + ".png";
+            cv::imwrite(save_img_path, im);
+            std::string save_map_path = prefix + "/map/" + std::to_string(img_id);
+            d_cam.SaveOnRender(save_map_path);
+            img_id++;
+            mpFrameDrawer->update_happened = false;
+        }
+
         cv::waitKey(mT);
 
         if(menuReset)

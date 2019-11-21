@@ -33,6 +33,7 @@ FrameDrawer::FrameDrawer(Map* pMap):mpMap(pMap)
 {
     mState=Tracking::SYSTEM_NOT_READY;
     mIm = cv::Mat(480,640,CV_8UC3, cv::Scalar(0,0,0));
+    update_happened = false;
 }
 
 cv::Mat FrameDrawer::DrawFrame()
@@ -173,6 +174,7 @@ void FrameDrawer::Update(Tracking *pTracker)
     mvbVO = vector<bool>(N,false);
     mvbMap = vector<bool>(N,false);
     mbOnlyTracking = pTracker->mbOnlyTracking;
+    update_happened = true;
 
 
     if(pTracker->mLastProcessedState==Tracking::NOT_INITIALIZED)

@@ -459,6 +459,10 @@ void Tracking::Track()
             MonocularInitialization();
 
         mpFrameDrawer->Update(this);
+        while (mpFrameDrawer->update_happened && is_use_viewer)
+        {
+            sleep_ms(100);
+        }
 
         if(mState!=OK)
             return;
@@ -615,6 +619,10 @@ void Tracking::Track()
 
         // Update drawer
         mpFrameDrawer->Update(this);
+        while (mpFrameDrawer->update_happened && is_use_viewer)
+        {
+            sleep_ms(100);
+        }
 
         // If tracking were good, check if we insert a keyframe
         if(bOK && !mbOnlyTracking)
@@ -1245,7 +1253,7 @@ void Tracking::UpdateLastFrame()
         }
         int nMapPoints = p3D.size();
 
-        bool is_debug_mode = true;
+        bool is_debug_mode = false;
         std::string fid = std::to_string(mCurrentFrame.mnId);
         std::string debug_path = "/home/alexander/materials/pnp3d/segoexp/pnpu_debug/" + fid + "_debug_method.txt";
         std::string debug_pose_path = "/home/alexander/materials/pnp3d/segoexp/pnpu_debug/" + fid + "_debug_pose.txt";
@@ -1271,13 +1279,6 @@ void Tracking::UpdateLastFrame()
 
         std::cout << " --- " << nInliers << std::endl;
 
-
-        std::string ref_log_path = "/home/alexander/materials/pnp3d/segoexp/pnpu_debug/" + fid + "_reflog.txt";
-        std::ofstream ref_out(ref_log_path);
-        //ref_out << mpReferenceKF->mnFrameId << std::endl;
-
-        ref_out << mLastFrame.mnId << std::endl;
-
         Eigen::Matrix4d Tcw_eig;
         Tcw_eig.setIdentity();
         if (!Tcw.empty())
@@ -1285,15 +1286,30 @@ void Tracking::UpdateLastFrame()
             cv::cv2eigen(Tcw, Tcw_eig);
         }
 
-        std::string pose_log_path = "/home/alexander/materials/pnp3d/segoexp/pnpu_debug/" + fid + "_posesest.txt";
-        std::ofstream pose_out(pose_log_path);
-        for (int i = 0; i < 3; i++)
+
+        std::ofstream pose_out;
+
+        if (is_debug_mode)
         {
-            for (int j = 0; j < 4; j++)
+            std::string ref_log_path = "/home/alexander/materials/pnp3d/segoexp/pnpu_debug/" + fid + "_reflog.txt";
+            std::ofstream ref_out(ref_log_path);
+            ref_out << mLastFrame.mnId << std::endl;
+
+            std::string pose_log_path = "/home/alexander/materials/pnp3d/segoexp/pnpu_debug/" + fid + "_posesest.txt";
+            pose_out = std::ofstream(pose_log_path);
+            for (int i = 0; i < 3; i++)
             {
-                pose_out << Tcw_eig(i, j) << " ";
+                for (int j = 0; j < 4; j++)
+                {
+                    pose_out << Tcw_eig(i, j) << " ";
+                }
             }
+
+
+
         }
+        //ref_out << mpReferenceKF->mnFrameId << std::endl;
+
 
         bool is_3d = true;
         if (Tcw.empty() || nInliers < 5)
@@ -1321,13 +1337,13 @@ void Tracking::UpdateLastFrame()
             int nInliersFin = 0;//pose_ref.Refine(&T_ref_fin, p2D, sigma2_lr, p3D, sigma3_lr, sigma3full_lr, vbInliersFin,
                                   //            s3dmin, s3dmax);
 
-            for (int i = 0; i < 3; i++)
-            {
-                for (int j = 0; j < 4; j++)
-                {
-                    pose_out << T_ref_fin(i, j) << " ";
-                }
-            }
+              if (is_debug_mode) {
+                  for (int i = 0; i < 3; i++) {
+                      for (int j = 0; j < 4; j++) {
+                          pose_out << T_ref_fin(i, j) << " ";
+                      }
+                  }
+              }
 
             if (nInliersFin > 0)
             {

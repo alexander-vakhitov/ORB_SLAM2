@@ -133,6 +133,8 @@ public:
 
     bool bUseUncertainty = true;
 
+    bool is_use_viewer = true;
+
 protected:
 
     // Main tracking function. It is independent of the input sensor.
